@@ -2,11 +2,16 @@ name: continuous build
 
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read # to fetch code (actions/checkout)
 
 jobs:
   build:
+    if: "github.repository == 'OpenMathLib/OpenBLAS'"
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -146,44 +151,58 @@ jobs:
 
 
   msys2:
+    if: "github.repository == 'OpenMathLib/OpenBLAS'"
     runs-on: windows-latest
 
     strategy:
       fail-fast: false
       matrix:
-        msystem: [MINGW64, MINGW32, CLANG64]
+        msystem: [UCRT64, MINGW32, CLANG64, CLANG32]
         idx: [int32, int64]
         build-type: [Release]
         include:
-          - msystem: MINGW64
+          - msystem: UCRT64
             idx: int32
-            target-prefix: mingw-w64-x86_64
-            fc-pkg: mingw-w64-x86_64-gcc-fortran
+            target-prefix: mingw-w64-ucrt-x86_64
+            fc-pkg: fc
           - msystem: MINGW32
             idx: int32
             target-prefix: mingw-w64-i686
-            fc-pkg: mingw-w64-i686-gcc-fortran
+            fc-pkg: fc
           - msystem: CLANG64
             idx: int32
             target-prefix: mingw-w64-clang-x86_64
+            fc-pkg: fc
+            # Compiling with Flang 16 seems to cause test errors on machines
+            # with AVX512 instructions. Revisit after MSYS2 distributes Flang 17.
+            no-avx512-flags: -DNO_AVX512=1
+          - msystem: CLANG32
+            idx: int32
+            target-prefix: mingw-w64-clang-i686
+            fc-pkg: cc
             c-lapack-flags: -DC_LAPACK=ON
-          - msystem: MINGW64
+          - msystem: UCRT64
             idx: int64
             idx64-flags: -DBINARY=64 -DINTERFACE64=1
-            target-prefix: mingw-w64-x86_64
-            fc-pkg: mingw-w64-x86_64-gcc-fortran
+            target-prefix: mingw-w64-ucrt-x86_64
+            fc-pkg: fc
           - msystem: CLANG64
             idx: int64
             idx64-flags: -DBINARY=64 -DINTERFACE64=1
             target-prefix: mingw-w64-clang-x86_64
-            c-lapack-flags: -DC_LAPACK=ON
-          - msystem: MINGW64
+            fc-pkg: fc
+            # Compiling with Flang 16 seems to cause test errors on machines
+            # with AVX512 instructions. Revisit after MSYS2 distributes Flang 17.
+            no-avx512-flags: -DNO_AVX512=1
+          - msystem: UCRT64
             idx: int32
-            target-prefix: mingw-w64-x86_64
-            fc-pkg: mingw-w64-x86_64-gcc-fortran
+            target-prefix: mingw-w64-ucrt-x86_64
+            fc-pkg: fc
             build-type: None
         exclude:
           - msystem: MINGW32
+            idx: int64
+          - msystem: CLANG32
             idx: int64
 
     defaults:
@@ -209,7 +228,7 @@ jobs:
           install: >-
             base-devel
             ${{ matrix.target-prefix }}-cc
-            ${{ matrix.fc-pkg }}
+            ${{ matrix.target-prefix }}-${{ matrix.fc-pkg }}
             ${{ matrix.target-prefix }}-cmake
             ${{ matrix.target-prefix }}-ninja
             ${{ matrix.target-prefix }}-ccache
@@ -261,6 +280,7 @@ jobs:
                 -DTARGET=CORE2 \
                 ${{ matrix.idx64-flags }} \
                 ${{ matrix.c-lapack-flags }} \
+                ${{ matrix.no-avx512-flags }} \
                 -DCMAKE_C_COMPILER_LAUNCHER=ccache \
                 -DCMAKE_Fortran_COMPILER_LAUNCHER=ccache \
                 ..
@@ -280,11 +300,25 @@ jobs:
           key: ${{ steps.ccache-prepare.outputs.key }}
 
       - name: Run tests
+        id: run-ctest
         timeout-minutes: 60
         run: cd build && ctest
 
+      - name: Re-run tests
+        if: always() && (steps.run-ctest.outcome == 'failure')
+        timeout-minutes: 60
+        run: |
+          cd build
+          echo "::group::Re-run ctest"
+          ctest --rerun-failed --output-on-failure || true
+          echo "::endgroup::"
+          echo "::group::Log from these tests"
+          [ ! -f Testing/Temporary/LastTest.log ] || cat Testing/Temporary/LastTest.log
+          echo "::endgroup::"
+
 
   cross_build:
+    if: "github.repository == 'OpenMathLib/OpenBLAS'"
     runs-on: ubuntu-22.04
 
     strategy:

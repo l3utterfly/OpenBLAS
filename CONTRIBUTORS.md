@@ -216,3 +216,10 @@ In chronological order:
   
 * Pablo Romero <https://github.com/pablorcum>
   * [2022-08] Fix building from sources for QNX
+
+* Mark Seminatore <https://github.com/mseminatore>
+  * [2023-11-09] Improve Windows threading performance scaling
+  * [2024-02-09] Introduce MT_TRACE facility and improve code consistency
+
+* Dirreke <https://github.com/mseminatore>
+  * [2024-01-16] Add basic support for the CSKY architecture

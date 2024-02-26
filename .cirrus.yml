@@ -1,35 +1,44 @@
 macos_instance:
   image: ghcr.io/cirruslabs/macos-monterey-xcode:latest
 
-task:
-  name: AppleM1/LLVM
-  compile_script:
-  - brew install llvm
-  - export PATH=/opt/homebrew/opt/llvm/bin:$PATH
-  - export LDFLAGS="-L/opt/homebrew/opt/llvm/lib"
-  - export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
-  - make TARGET=VORTEX USE_OPENMP=1 CC=clang
+#task:
+#  name: AppleM1/LLVM
+#  compile_script:
+#  - brew install llvm
+#  - export PATH=/opt/homebrew/opt/llvm/bin:$PATH
+#  - export LDFLAGS="-L/opt/homebrew/opt/llvm/lib"
+#  - export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
+#  - make TARGET=VORTEX USE_OPENMP=1 CC=clang
 
-task:
-  name: AppleM1/LLVM/ILP64
-  compile_script:
-  - brew install llvm
-  - export PATH=/opt/homebrew/opt/llvm/bin:$PATH
-  - export LDFLAGS="-L/opt/homebrew/opt/llvm/lib"
-  - export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
-  - make TARGET=VORTEX USE_OPENMP=1 CC=clang INTERFACE64=1
+#task:
+#  name: AppleM1/LLVM/ILP64
+#  compile_script:
+#  - brew install llvm
+#  - export PATH=/opt/homebrew/opt/llvm/bin:$PATH
+#  - export LDFLAGS="-L/opt/homebrew/opt/llvm/lib"
+#  - export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
+#  - make TARGET=VORTEX USE_OPENMP=1 CC=clang INTERFACE64=1
 
-task:
-  name: AppleM1/LLVM/CMAKE
-  compile_script:
-  - brew install llvm
-  - export PATH=/opt/homebrew/opt/llvm/bin:$PATH
-  - export LDFLAGS="-L/opt/homebrew/opt/llvm/lib"
-  - export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
-  - mkdir build
-  - cd build
-  - cmake -DTARGET=VORTEX -DCMAKE_C_COMPILER=clang -DBUILD_SHARED_LIBS=ON ..
-  - make
+#task:
+#  name: AppleM1/LLVM/CMAKE
+#  compile_script:
+#  - brew install llvm
+#  - export PATH=/opt/homebrew/opt/llvm/bin:$PATH
+#  - export LDFLAGS="-L/opt/homebrew/opt/llvm/lib"
+#  - export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
+#  - mkdir build
+#  - cd build
+#  - cmake -DTARGET=VORTEX -DCMAKE_C_COMPILER=clang -DBUILD_SHARED_LIBS=ON ..
+#  - make -j 4
+
+#task:
+#  name: AppleM1/GCC/MAKE/OPENMP
+#  compile_script:
+#  - brew install gcc@11
+#  - export PATH=/opt/homebrew/bin:$PATH
+#  - export LDFLAGS="-L/opt/homebrew/lib"
+#  - export CPPFLAGS="-I/opt/homebrew/include"
+#  - make CC=gcc-11 FC=gfortran-11 USE_OPENMP=1
   
 macos_instance:
   image: ghcr.io/cirruslabs/macos-monterey-xcode:latest
@@ -138,6 +147,16 @@ FreeBSD_task:
   compile_script:
   - ls -l /usr/local/lib
   - gmake CC=gcc INTERFACE64=1
+
+FreeBSD_task:
+  name: FreeBSD-clang-openmp
+  freebsd_instance:
+    image_family: freebsd-13-2
+  install_script:
+  - pkg update -f && pkg upgrade -y && pkg install -y gmake gcc 
+  - ln -s /usr/local/lib/gcc12/libgfortran.so.5.0.0 /usr/lib/libgfortran.so
+  compile_script:
+  - gmake CC=clang FC=gfortran USE_OPENMP=1 CPP_THREAD_SAFETY_TEST=1
 
 #task:
 #  name: Windows/LLVM16     --- too slow ---

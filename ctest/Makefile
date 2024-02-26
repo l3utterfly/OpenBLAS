@@ -208,11 +208,19 @@ FLDFLAGS = $(FFLAGS:-fPIC=) $(LDFLAGS)
 ifeq ($(USE_OPENMP), 1)
 ifeq ($(F_COMPILER), GFORTRAN)
 ifeq ($(C_COMPILER), CLANG)
-CEXTRALIB = -lomp
+CEXTRALIB += -lomp
 endif
 endif
 ifeq ($(F_COMPILER), NAG)
 CEXTRALIB = -lgomp
+endif
+ifeq ($(F_COMPILER), IBM)
+ifeq ($(C_COMPILER), GCC)
+CEXTRALIB += -lgomp
+endif
+ifeq ($(C_COMPILER), CLANG)
+CEXTRALIB += -lomp
+endif
 endif
 endif
 

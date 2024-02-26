@@ -275,6 +275,7 @@ extern gotoblas_t  gotoblas_EXCAVATOR;
 #define gotoblas_SKYLAKEX gotoblas_SANDYBRIDGE
 #define gotoblas_COOPERLAKE gotoblas_SANDYBRIDGE
 #define gotoblas_ZEN gotoblas_SANDYBRIDGE
+#define gotoblas_SAPPHIRERAPIDS gotoblas_SANDYBRIDGE
 #else
 extern gotoblas_t  gotoblas_HASWELL;
 extern gotoblas_t  gotoblas_ZEN;
@@ -805,7 +806,8 @@ static gotoblas_t *get_coretype(void){
         }      
 	return NULL;
       }
-      case 0xf:
+      break;
+    case 0xf:
       if (model <= 0x2) return &gotoblas_NORTHWOOD;
       return &gotoblas_PRESCOTT;
     }
