@@ -122,10 +122,10 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     GLD xv, , X0, X, 0x00, X1, X, 0x10, X2, X, 0x20, X3, X, 0x30
     GPERMI xv, q, X0, X0, 0, X1, X1, 0, X2, X2, 0, X3, X3, 0
     GCOMPLEXMUL GXCONJ, \
-    xvf, d, X0, X0, VALPHA, TMP0, TMP1, TMP2, \
-    X1, X1, VALPHA, TMP0, TMP1, TMP2, \
-    X2, X2, VALPHA, TMP0, TMP1, TMP2, \
-    X3, X3, VALPHA, TMP0, TMP1, TMP2
+    xvf, d, X0, VALPHA, X0, TMP0, TMP1, TMP2, \
+    X1, VALPHA, X1, TMP0, TMP1, TMP2, \
+    X2, VALPHA, X2, TMP0, TMP1, TMP2, \
+    X3, VALPHA, X3, TMP0, TMP1, TMP2
 .endm
 
 .macro ZLOAD_X_4_GAP
@@ -145,10 +145,10 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     xvpermi.q   X3,     X3,     0
 
     GCOMPLEXMUL GXCONJ, \
-    xvf, d, X0, X0, VALPHA, TMP0, TMP1, TMP2, \
-    X1, X1, VALPHA, TMP0, TMP1, TMP2, \
-    X2, X2, VALPHA, TMP0, TMP1, TMP2, \
-    X3, X3, VALPHA, TMP0, TMP1, TMP2
+    xvf, d, X0, VALPHA, X0, TMP0, TMP1, TMP2, \
+    X1, VALPHA, X1, TMP0, TMP1, TMP2, \
+    X2, VALPHA, X2, TMP0, TMP1, TMP2, \
+    X3, VALPHA, X3, TMP0, TMP1, TMP2
 .endm
 
 .macro ZLOAD_Y_4
@@ -216,7 +216,7 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     GLD xv, , X0, X, 0x00
     GPERMI xv, q, X0, X0, 0
     GCOMPLEXMUL GXCONJ, \
-    xvf, d, X0, X0, VALPHA, TMP0, TMP1, TMP2
+    xvf, d, X0, VALPHA, X0, TMP0, TMP1, TMP2
 .endm
 
 .macro ZGEMV_N_1x1
@@ -298,7 +298,7 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
     PROLOGUE
     PTR_LD     INC_Y,  $sp,    0
-    push_if_used 17 + 7, 31
+    push_if_used 7, 7
     PTR_ADDI   K,      $r0,     0x01
     PTR_SUB    I,      INC_X,   K
     PTR_SUB    J,      INC_Y,   K
@@ -337,7 +337,7 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .L_GAP_1_1: /* if (inc_x != 1) && (incy != 1) */
     ZGEMV_N_LASX GAP_1_1, X_4_GAP, X_1, Y_4_GAP, Y_1
 .L_END:
-    pop_if_used 17 + 7, 31
+    pop_if_used 7, 7
     jirl    $r0, $r1, 0x0
     EPILOGUE
 

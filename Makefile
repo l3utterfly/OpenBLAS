@@ -1,6 +1,7 @@
 TOPDIR	= .
 include ./Makefile.system
 LNCMD = ln -fs
+OSNAME_DISPLAY ?= $(OSNAME)
 ifeq ($(FIXED_LIBNAME), 1)
 LNCMD = true
 endif
@@ -45,6 +46,10 @@ else
 LAPACK_NOOPT := $(filter-out -O0 -O1 -O2 -O3 -Ofast -O -Og -Os,$(LAPACK_FFLAGS))
 endif
 
+ifdef LAPACK_STRLEN
+LAPACK_FFLAGS += -DLAPACK_STRLEN=$(LAPACK_STRLEN)
+endif
+
 SUBDIRS_ALL = $(SUBDIRS) test ctest utest exports benchmark ../laswp ../bench cpp_thread_test
 
 .PHONY : all libs netlib $(RELA) test ctest shared install
@@ -54,7 +59,7 @@ all :: tests
 	@echo
 	@echo " OpenBLAS build complete. ($(LIB_COMPONENTS))"
 	@echo
-	@echo "  OS               ... $(OSNAME)             "
+	@echo "  OS               ... $(OSNAME_DISPLAY)             "
 	@echo "  Architecture     ... $(ARCH)               "
 ifndef BINARY64
 	@echo "  BINARY           ... 32bit                 "
@@ -89,6 +94,11 @@ ifeq ($(NOFORTRAN), $(filter 0,$(NOFORTRAN)))
 	   echo "  Fortran compiler ... $(F_COMPILER)  (command line : $(FC))";\
 	fi
 endif
+
+ifeq ($(OSNAME), WINNT)
+	@-$(LNCMD) $(LIBNAME) $(LIBPREFIX).$(LIBSUFFIX)
+endif
+
 ifneq ($(OSNAME), AIX)
 	@echo -n "  Library Name     ... $(LIBNAME)"
 else
@@ -317,7 +327,11 @@ endif
 ifeq ($(C_COMPILER)$(F_COMPILER)$(USE_OPENMP), CLANGGFORTRAN1)
 	-@echo "LDFLAGS     = $(FFLAGS) $(EXTRALIB) -lomp" >> $(NETLIB_LAPACK_DIR)/make.inc
 else
+ifeq ($(C_COMPILER)$(F_COMPILER)$(USE_OPENMP), CLANGIBM1)
+	-@echo "LDFLAGS     = $(FFLAGS) $(EXTRALIB) -lomp" >> $(NETLIB_LAPACK_DIR)/make.inc
+else
 	-@echo "LDFLAGS     = $(FFLAGS) $(EXTRALIB)" >> $(NETLIB_LAPACK_DIR)/make.inc
+endif
 endif
 	-@echo "CC          = $(CC)" >> $(NETLIB_LAPACK_DIR)/make.inc
 	-@echo "override CFLAGS      = $(LAPACK_CFLAGS)" >> $(NETLIB_LAPACK_DIR)/make.inc
@@ -418,6 +432,9 @@ dummy :
 install :
 	$(MAKE) -f Makefile.install install
 
+install_tests :
+	$(MAKE) -f Makefile.install install_tests
+
 clean ::
 	@for d in $(SUBDIRS_ALL) ; \
 	do if test -d $$d; then \
@@ -436,7 +453,7 @@ endif
 	@rm -f cblas.tmp cblas.tmp2
 	@touch $(NETLIB_LAPACK_DIR)/make.inc
 	@$(MAKE) -C $(NETLIB_LAPACK_DIR) clean
-	@rm -f $(NETLIB_LAPACK_DIR)/make.inc $(NETLIB_LAPACK_DIR)/lapacke/include/lapacke_mangling.h
+	@rm -f $(NETLIB_LAPACK_DIR)/make.inc
 	@$(MAKE) -C relapack clean
 	@rm -f *.grd Makefile.conf_last config_last.h
 	@(cd $(NETLIB_LAPACK_DIR)/TESTING && rm -f x* *.out testing_results.txt)

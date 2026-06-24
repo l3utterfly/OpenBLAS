@@ -111,8 +111,8 @@ typedef struct blas_queue {
   struct blas_queue *next;
 
 #if defined( __WIN32__) || defined(__CYGWIN32__) || defined(_WIN32) || defined(__CYGWIN__)
-  // CRITICAL_SECTION lock;
-  // HANDLE finish;
+   CRITICAL_SECTION lock;
+   HANDLE finish;
   volatile int finished;
 #else
   pthread_mutex_t	 lock;
@@ -190,6 +190,9 @@ int exec_blas(BLASLONG num_cpu, blas_param_t *param, void *buffer);
 #endif
 
 #ifndef ASSEMBLER
+
+void blas_level3_thread_enter(void);
+void blas_level3_thread_leave(void);
 
 int blas_level1_thread(int mode, BLASLONG m, BLASLONG n, BLASLONG k, void *alpha,
 		       void *a, BLASLONG lda,

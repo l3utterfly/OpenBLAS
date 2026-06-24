@@ -1,6 +1,6 @@
 /*********************************************************************/
 /* Copyright 2009, 2010 The University of Texas at Austin.           */
-/* Copyright 2023 The OpenBLAS Project.                              */
+/* Copyright 2023, 2025 The OpenBLAS Project.                        */
 /* All rights reserved.                                              */
 /*                                                                   */
 /* Redistribution and use in source and binary forms, with or        */
@@ -41,12 +41,18 @@
 #define CACHE_LINE_SIZE 8
 #endif
 
+#define DIVIDE_RATE_MAX 2
+
 #ifndef DIVIDE_RATE
 #define DIVIDE_RATE 2
 #endif
 
-#ifndef GEMM_PREFERED_SIZE
-#define GEMM_PREFERED_SIZE 1
+#ifdef DYNAMIC_ARCH
+#undef GEMM_PREFERRED_SIZE
+#define GEMM_PREFERRED_SIZE gotoblas->preferred_size
+#endif
+#ifndef GEMM_PREFERRED_SIZE
+#define GEMM_PREFERRED_SIZE 1
 #endif
 
 //The array of job_t may overflow the stack.
@@ -92,8 +98,12 @@
 #endif
 
 typedef struct {
+#ifdef HAVE_C11
+  _Atomic
+#else
   volatile
-   BLASLONG working[MAX_CPU_NUMBER][CACHE_LINE_SIZE * DIVIDE_RATE];
+#endif
+   BLASLONG working[MAX_CPU_NUMBER][CACHE_LINE_SIZE * DIVIDE_RATE_MAX];
 } job_t;
 
 
@@ -216,9 +226,25 @@ typedef struct {
 #define STOP_RPCC(COUNTER)
 #endif
 
+#if defined(BUILD_BFLOAT16)
+#if defined(DYNAMIC_ARCH)
+  #if defined(BGEMM)
+    #define BFLOAT16_ALIGN_K gotoblas->bgemm_align_k
+  #else
+    #define BFLOAT16_ALIGN_K gotoblas->sbgemm_align_k
+  #endif
+#else
+  #if defined(BGEMM)
+    #define BFLOAT16_ALIGN_K BGEMM_ALIGN_K
+  #else
+    #define BFLOAT16_ALIGN_K SBGEMM_ALIGN_K
+  #endif
+#endif
+#endif
+
 static int inner_thread(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, IFLOAT *sa, IFLOAT *sb, BLASLONG mypos){
 
-  IFLOAT *buffer[DIVIDE_RATE];
+  IFLOAT *buffer[DIVIDE_RATE_MAX];
 
   BLASLONG k, lda, ldb, ldc;
   BLASLONG m_from, m_to, n_from, n_to;
@@ -230,6 +256,7 @@ static int inner_thread(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, 
 
   BLASLONG nthreads_m;
   BLASLONG mypos_m, mypos_n;
+  BLASLONG divide_rate = DIVIDE_RATE;
 
   BLASLONG is, js, ls, bufferside, jjs;
   BLASLONG min_i, min_l, div_n, min_jj;
@@ -263,6 +290,11 @@ static int inner_thread(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, 
 
   alpha = (FLOAT *)args -> alpha;
   beta  = (FLOAT *)args -> beta;
+
+  /* Disable divide_rate when N of all threads are less than to DIVIDE_LIMIT */
+#ifdef DIVIDE_LIMIT
+  if (N < DIVIDE_LIMIT) divide_rate = 1;
+#endif
 
   /* Initialize 2D CPU distribution */
   nthreads_m = args -> nthreads;
@@ -305,9 +337,9 @@ static int inner_thread(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, 
       ) return 0;
 
   /* Initialize workspace for local region of B */
-  div_n = (n_to - n_from + DIVIDE_RATE - 1) / DIVIDE_RATE;
+  div_n = (n_to - n_from + divide_rate - 1) / divide_rate;
   buffer[0] = sb;
-  for (i = 1; i < DIVIDE_RATE; i++) {
+  for (i = 1; i < divide_rate; i++) {
     buffer[i] = buffer[i - 1] + GEMM_Q * ((div_n + GEMM_UNROLL_N - 1)/GEMM_UNROLL_N) * GEMM_UNROLL_N * COMPSIZE;
   }
 
@@ -324,12 +356,8 @@ static int inner_thread(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, 
     
     BLASLONG pad_min_l = min_l;
 
-#if defined(HALF)
-#if defined(DYNAMIC_ARCH)
-    pad_min_l = (min_l + gotoblas->sbgemm_align_k - 1) & ~(gotoblas->sbgemm_align_k-1);
-#else
-    pad_min_l = (min_l + SBGEMM_ALIGN_K - 1) & ~(SBGEMM_ALIGN_K - 1);;
-#endif
+#if defined(BFLOAT16)
+    pad_min_l = (min_l + BFLOAT16_ALIGN_K - 1) & ~(BFLOAT16_ALIGN_K - 1);
 #endif
 
     /* Determine step size in m
@@ -353,7 +381,7 @@ static int inner_thread(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, 
     STOP_RPCC(copy_A);
 
     /* Copy local region of B into workspace and apply kernel */
-    div_n = (n_to - n_from + DIVIDE_RATE - 1) / DIVIDE_RATE;
+    div_n = (n_to - n_from + divide_rate - 1) / divide_rate;
     for (js = n_from, bufferside = 0; js < n_to; js += div_n, bufferside ++) {
 
       /* Make sure if no one is using workspace */
@@ -422,7 +450,7 @@ static int inner_thread(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, 
       if (current >= (mypos_n + 1) * nthreads_m) current = mypos_n * nthreads_m;
 
       /* Split other region of B into parts */
-      div_n = (range_n[current + 1]  - range_n[current] + DIVIDE_RATE - 1) / DIVIDE_RATE;
+      div_n = (range_n[current + 1]  - range_n[current] + divide_rate - 1) / divide_rate;
       for (js = range_n[current], bufferside = 0; js < range_n[current + 1]; js += div_n, bufferside ++) {
         if (current != mypos) {
 
@@ -473,7 +501,7 @@ static int inner_thread(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, 
       do {
 
         /* Split region of B into parts and apply kernel */
-	div_n = (range_n[current + 1]  - range_n[current] + DIVIDE_RATE - 1) / DIVIDE_RATE;
+	div_n = (range_n[current + 1]  - range_n[current] + divide_rate - 1) / divide_rate;
 	for (js = range_n[current], bufferside = 0; js < range_n[current + 1]; js += div_n, bufferside ++) {
 
           /* Apply kernel with local region of A and part of region of B */
@@ -508,7 +536,7 @@ static int inner_thread(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, 
   /* Wait until all other threads are done with local region of B */
   START_RPCC();
   for (i = 0; i < args -> nthreads; i++) {
-    for (js = 0; js < DIVIDE_RATE; js++) {
+    for (js = 0; js < divide_rate; js++) {
       while (job[mypos].working[i][CACHE_LINE_SIZE * js] ) {YIELDING;};
     }
   }
@@ -545,15 +573,6 @@ static int gemm_driver(blas_arg_t *args, BLASLONG *range_m, BLASLONG
 		       *range_n, IFLOAT *sa, IFLOAT *sb,
                        BLASLONG nthreads_m, BLASLONG nthreads_n) {
 
-#ifndef USE_OPENMP
-#ifndef OS_WINDOWS
-static pthread_mutex_t  level3_lock    = PTHREAD_MUTEX_INITIALIZER;
-#else
-CRITICAL_SECTION level3_lock;
-InitializeCriticalSection((PCRITICAL_SECTION)&level3_lock);
-#endif
-#endif
-
   blas_arg_t newarg;
 
 #ifndef USE_ALLOC_HEAP
@@ -571,7 +590,7 @@ InitializeCriticalSection((PCRITICAL_SECTION)&level3_lock);
 
   BLASLONG nthreads = args -> nthreads;
 
-  BLASLONG width, i, j, k, js;
+  BLASLONG width, width_n, i, j, k, js;
   BLASLONG m, n, n_from, n_to;
   int mode;
 #if defined(DYNAMIC_ARCH)
@@ -599,13 +618,7 @@ InitializeCriticalSection((PCRITICAL_SECTION)&level3_lock);
 #endif
 #endif
 
-#ifndef USE_OPENMP
-#ifndef OS_WINDOWS
-pthread_mutex_lock(&level3_lock);
-#else
-EnterCriticalSection((PCRITICAL_SECTION)&level3_lock);
-#endif
-#endif
+  blas_level3_thread_enter();
 
 #ifdef USE_ALLOC_HEAP
   /* Dynamically allocate workspace */
@@ -655,7 +668,7 @@ EnterCriticalSection((PCRITICAL_SECTION)&level3_lock);
   while (m > 0){
     width = blas_quickdivide(m + nthreads_m - num_parts - 1, nthreads_m - num_parts);
 
-    width = round_up(m, width, GEMM_PREFERED_SIZE);
+    width = round_up(m, width, GEMM_PREFERRED_SIZE);
 
     m -= width;
 
@@ -698,18 +711,25 @@ EnterCriticalSection((PCRITICAL_SECTION)&level3_lock);
     /* Partition (a step of) n into nthreads regions */
     range_N[0] = js;
     num_parts  = 0;
-    while (n > 0){
-      width = blas_quickdivide(n + nthreads - num_parts - 1, nthreads - num_parts);
-      if (width < switch_ratio) {
-        width = switch_ratio;
+    for(j = 0; j < nthreads_n; j++){
+      width_n = blas_quickdivide(n + nthreads_n - j - 1, nthreads_n - j);
+      n -= width_n;
+      for(i = 0; i < nthreads_m; i++){
+        width = blas_quickdivide(width_n + nthreads_m - i - 1, nthreads_m - i);
+        if (width < switch_ratio) {
+          width = switch_ratio;
+        }
+        width = round_up(width_n, width, GEMM_PREFERRED_SIZE);
+
+        width_n -= width;
+        if (width_n < 0) {
+          width = width + width_n;
+          width_n = 0;
+        }
+        range_N[num_parts + 1] = range_N[num_parts] + width;
+
+        num_parts ++;
       }
-      width = round_up(n, width, GEMM_PREFERED_SIZE);
-
-      n -= width;
-      if (n < 0) width = width + n;
-      range_N[num_parts + 1] = range_N[num_parts] + width;
-
-      num_parts ++;
     }
     for (j = num_parts; j < MAX_CPU_NUMBER; j++) {
       range_N[j + 1] = range_N[num_parts];
@@ -732,13 +752,7 @@ EnterCriticalSection((PCRITICAL_SECTION)&level3_lock);
   free(job);
 #endif
 
-#ifndef USE_OPENMP
-#ifndef OS_WINDOWS
-  pthread_mutex_unlock(&level3_lock);
-#else
-  LeaveCriticalSection((PCRITICAL_SECTION)&level3_lock);
-#endif
-#endif
+  blas_level3_thread_leave();
 
   return 0;
 }
@@ -779,6 +793,27 @@ int CNAME(blas_arg_t *args, BLASLONG *range_m, BLASLONG *range_n, IFLOAT *sa, IF
     nthreads_n = (n + switch_ratio * nthreads_m - 1) / (switch_ratio * nthreads_m);
     if (nthreads_m * nthreads_n > args -> nthreads) {
       nthreads_n = blas_quickdivide(args -> nthreads, nthreads_m);
+    }
+    /* The nthreads_m and nthreads_n are adjusted so that the submatrix       */
+    /* to be handled by each thread preferably becomes a square matrix        */
+    /* by minimizing an objective function 'n * nthreads_m + m * nthreads_n'. */
+    /* Objective function come from sum of partitions in m and n.             */
+    /* (n / nthreads_n) + (m / nthreads_m)                                    */
+    /* = (n * nthreads_m + m * nthreads_n) / (nthreads_n * nthreads_m)        */
+    BLASLONG cost = 0, div = 0;
+    BLASLONG i;
+    for (i = 1; i <= sqrt(nthreads_m); i++) {
+      if (nthreads_m % i) continue;
+      BLASLONG j = nthreads_m / i;
+      BLASLONG cost_i = n * j + m * nthreads_n * i;
+      BLASLONG cost_j = n * i + m * nthreads_n * j;
+      if (cost == 0 ||
+          cost_i < cost) {cost = cost_i; div = i;}
+      if (cost_j < cost) {cost = cost_j; div = j;}
+    }
+    if (div > 1) {
+      nthreads_m /= div;
+      nthreads_n *= div;
     }
   }
 

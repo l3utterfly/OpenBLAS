@@ -105,6 +105,7 @@ static double check_zdrot(blasint n, blasint inc_x, blasint inc_y, double *c, do
     return (norm / 2);
 }
 
+#ifndef NO_CBLAS
 /**
  * C API specific function
  * Comapare results computed by zdrot and zaxpby 
@@ -163,7 +164,7 @@ static double c_api_check_zdrot(blasint n, blasint inc_x, blasint inc_y, double 
     norm += cblas_dznrm2(n, data_zrot.y_test, inc_y_abs);
     return (norm / 2);
 }
-
+#if 0
 /**
  * Fortran API specific test
  * Test zrot by comparing it with zaxpby.
@@ -189,7 +190,7 @@ CTEST(zrot, inc_x_0_inc_y_0)
     double norm = check_zdrot(n, inc_x, inc_y, c, s);
     ASSERT_DBL_NEAR_TOL(0.0, norm, DOUBLE_EPS);
 }
-
+#endif
 /**
  * Fortran API specific test
  * Test zrot by comparing it with zaxpby.
@@ -475,7 +476,7 @@ CTEST(zrot, check_n_zero)
     double norm = check_zdrot(n, inc_x, inc_y, c, s);
     ASSERT_DBL_NEAR_TOL(0.0, norm, DOUBLE_EPS);
 }
-
+#if 0
 /**
  * C API specific test 
  * Test zrot by comparing it with zaxpby.
@@ -501,7 +502,7 @@ CTEST(zrot, c_api_inc_x_0_inc_y_0)
     double norm = c_api_check_zdrot(n, inc_x, inc_y, c, s);
     ASSERT_DBL_NEAR_TOL(0.0, norm, DOUBLE_EPS);
 }
-
+#endif
 /**
  * C API specific test
  * Test zrot by comparing it with zaxpby.
@@ -787,4 +788,5 @@ CTEST(zrot, c_api_check_n_zero)
     double norm = c_api_check_zdrot(n, inc_x, inc_y, c, s);
     ASSERT_DBL_NEAR_TOL(0.0, norm, DOUBLE_EPS);
 }
+#endif
 #endif

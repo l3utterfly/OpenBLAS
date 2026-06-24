@@ -39,6 +39,9 @@ endif
 ifndef BUILD_BFLOAT16
 BUILD_BFLOAT16 = 0
 endif
+ifndef BUILD_HFLOAT16
+BUILD_HFLOAT16 = 0
+endif
 ifndef BUILD_SINGLE
 BUILD_SINGLE = 0
 endif
@@ -130,14 +133,14 @@ dll  : ../$(LIBDLLNAME)
 	-Wl,--whole-archive ../$(LIBNAME) -Wl,--no-whole-archive $(FEXTRALIB) $(EXTRALIB)
 
 $(LIBPREFIX).def : $(GENSYM)
-	./$(GENSYM) win2k    $(ARCH) dummy $(EXPRECISION) $(NO_CBLAS) $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
+	./$(GENSYM) win2k    $(ARCH) dummy $(EXPRECISION) $(NO_CBLAS) $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_HFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
 
 libgoto_hpl.def : $(GENSYM)
-	./$(GENSYM) win2khpl $(ARCH) dummy $(EXPRECISION) $(NO_CBLAS) $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
+	./$(GENSYM) win2khpl $(ARCH) dummy $(EXPRECISION) $(NO_CBLAS) $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_HFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
 
 ifeq ($(OSNAME), Darwin)
 ifeq ($(FIXED_LIBNAME),1)
-INTERNALNAME = $(LIBPREFIX)$(LIBNAMESUFFIX).dylib
+INTERNALNAME = $(LIBPREFIX).dylib
 else
 INTERNALNAME = $(LIBPREFIX).$(MAJOR_VERSION).dylib
 endif
@@ -160,7 +163,11 @@ else
 ifeq ($(F_COMPILER), FLANG)
 	$(FC) $(FFLAGS) $(LDFLAGS) -fno-fortran-main -Mnomain -all_load -headerpad_max_install_names -install_name "$(CURDIR)/../$(INTERNALNAME)" -dynamiclib -o ../$(LIBDYNNAME) $< -Wl,-exported_symbols_list,osx.def  $(FEXTRALIB)
 else
+ifeq ($(F_COMPILER), FLANGNEW)
+	$(FC) $(FFLAGS) $(LDFLAGS) -Wl,-all_load -Wl,-headerpad_max_install_names -Wl,-install_name,"$(CURDIR)/../$(INTERNALNAME)" -Wl,-dylib -o ../$(LIBDYNNAME) $< -Wl,-exported_symbols_list,osx.def  $(FEXTRALIB)
+else
 	$(FC) $(FFLAGS) $(LDFLAGS) -all_load -headerpad_max_install_names -install_name "$(CURDIR)/../$(INTERNALNAME)" -dynamiclib -o ../$(LIBDYNNAME) $< -Wl,-exported_symbols_list,osx.def  $(FEXTRALIB)
+endif
 endif
 endif
 endif
@@ -178,7 +185,7 @@ FEXTRALIB += -lm
 EXTRALIB += -lm
 else
 ifeq ($(FIXED_LIBNAME),1)
-INTERNALNAME = $(LIBPREFIX)$(LIBNAMESUFFIX).so
+INTERNALNAME = $(LIBPREFIX).so
 else
 INTERNALNAME = $(LIBPREFIX).so.$(MAJOR_VERSION)
 endif
@@ -197,7 +204,7 @@ ifeq ($(F_COMPILER), INTEL)
 	-Wl,--whole-archive $< -Wl,--no-whole-archive \
 	-Wl,-soname,$(INTERNALNAME) $(EXTRALIB)
 	$(CC) $(CFLAGS) $(LDFLAGS) -w -o linktest linktest.c ../$(LIBSONAME) $(FEXTRALIB) && echo OK.
-else ifeq ($(F_COMPILER), FLANG)
+else ifeq ($(F_COMPILER), $(filter $(F_COMPILER),FLANG FLANGNEW))
 	$(FC) $(FFLAGS) $(LDFLAGS) -shared -o ../$(LIBSONAME) \
 	-Wl,--whole-archive $< -Wl,--no-whole-archive \
 	-Wl,-soname,$(INTERNALNAME) $(EXTRALIB)
@@ -266,7 +273,7 @@ so : ../$(LIBSONAME) linktest.c
 
 ../$(LIBSONAME) : aix.exp
 	$(CC) $(CFLAGS) $(LDFLAGS)  -shared -o ../$(LIBSONAME) \
-	-Wl,-bE:aix.exp -Wl,-bbigtoc ../$(LIBNAME) $(EXTRALIB)
+	-Wl,-bcdtors:all:-2147481648:s,-bE:aix.exp -Wl,-bbigtoc ../$(LIBNAME) $(EXTRALIB)
 
 aix.exp :
 	/usr/bin/nm -X32_64 -PCpgl ../$(LIBNAME) | /usr/bin/awk '{ if ((($$ 2 == "T") \
@@ -298,28 +305,23 @@ static : ../$(LIBNAME)
 	rm -f goto.$(SUFFIX)
 
 osx.def : $(GENSYM) ../Makefile.system ../getarch.c
-	./$(GENSYM) osx $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS)  $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
+	./$(GENSYM) osx $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS)  $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_HFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
 
 aix.def : $(GENSYM) ../Makefile.system ../getarch.c
-	./$(GENSYM) aix $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS)  $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
+	./$(GENSYM) aix $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS)  $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_HFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
 
 objcopy.def : $(GENSYM) ../Makefile.system ../getarch.c
-	./$(GENSYM) objcopy $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS)  $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
+	./$(GENSYM) objcopy $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS)  $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_HFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
 
 objconv.def : $(GENSYM) ../Makefile.system ../getarch.c
-	./$(GENSYM) objconv $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS)  $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
+	./$(GENSYM) objconv $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS)  $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_HFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > $(@F)
 
 test : linktest.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -w -o linktest linktest.c ../$(LIBSONAME) -lm && echo OK.
 	rm -f linktest
 
 linktest.c : $(GENSYM) ../Makefile.system ../getarch.c
-	./$(GENSYM) linktest  $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS) $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > linktest.c
-ifeq ($(F_COMPILER), IBM)
-	mv linktest.c linktest.c.FIRST
-	egrep -v 'second_|dsecnd_' linktest.c.FIRST > linktest.c
-	rm linktest.c.FIRST
-endif
+	./$(GENSYM) linktest  $(ARCH) "$(BU)" $(EXPRECISION) $(NO_CBLAS) $(NO_LAPACK) $(NO_LAPACKE) $(NEED2UNDERSCORES) $(ONLY_CBLAS) "$(SYMBOLPREFIX)" "$(SYMBOLSUFFIX)" $(BUILD_LAPACK_DEPRECATED) $(BUILD_BFLOAT16) $(BUILD_HFLOAT16) $(BUILD_SINGLE) $(BUILD_DOUBLE) $(BUILD_COMPLEX) $(BUILD_COMPLEX16) > linktest.c
 
 clean ::
 	@rm -f *.def *.dylib __.SYMDEF* *.renamed

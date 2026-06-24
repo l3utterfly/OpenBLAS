@@ -2,13 +2,14 @@
 ## Author: Hank Anderson <hank@statease.com>
 ##
 
-cmake_minimum_required(VERSION 2.8.5)
+cmake_minimum_required(VERSION 3.16.0)
 
+set (CMAKE_ASM_SOURCE_FILE_EXTENSIONS "S")
 project(OpenBLAS C ASM)
 
 set(OpenBLAS_MAJOR_VERSION 0)
 set(OpenBLAS_MINOR_VERSION 3)
-set(OpenBLAS_PATCH_VERSION 26.dev)
+set(OpenBLAS_PATCH_VERSION 33.dev)
 
 set(OpenBLAS_VERSION "${OpenBLAS_MAJOR_VERSION}.${OpenBLAS_MINOR_VERSION}.${OpenBLAS_PATCH_VERSION}")
 
@@ -20,15 +21,21 @@ include(CMakePackageConfigHelpers)
 #######
 option(BUILD_WITHOUT_LAPACK "Do not build LAPACK and LAPACKE (Only BLAS or CBLAS)" OFF)
 
+option(BUILD_WITHOUT_LAPACKE "Do not build the C interface to LAPACK)" OFF)
+
 option(BUILD_LAPACK_DEPRECATED "When building LAPACK, include also some older, deprecated routines" ON)
 
+set(LAPACK_STRLEN "" CACHE STRING "When building LAPACK, use this type (e.g. \"int\") for character lengths (defaults to size_t)")
+
 option(BUILD_TESTING "Build LAPACK testsuite when building LAPACK" ON)
+
+option(BUILD_BENCHMARKS "Build the collection of BLAS/LAPACK benchmarks" OFF)
 
 option(C_LAPACK "Build LAPACK from C sources instead of the original Fortran" OFF)
 
 option(BUILD_WITHOUT_CBLAS "Do not build the C interface (CBLAS) to the BLAS functions" OFF)
 
-option(DYNAMIC_ARCH "Include support for multiple CPU targets, with automatic selection at runtime (x86/x86_64, aarch64 or ppc only)" OFF)
+option(DYNAMIC_ARCH "Include support for multiple CPU targets, with automatic selection at runtime (x86/x86_64, aarch64, ppc or RISCV64-RVV1.0 only)" OFF)
 
 option(DYNAMIC_OLDER "Include specific support for older x86 cpu models (Penryn,Dunnington,Atom,Nano,Opteron) with DYNAMIC_ARCH" OFF)
 
@@ -51,10 +58,12 @@ else()
   set(NO_AFFINITY 1)
 endif()
 
-option(CPP_THREAD_SAFETY_TEST "Run a massively parallel DGEMM test to confirm thread safety of the library (requires OpenMP and about 1.3GB of RAM)" OFF)
+option(CPP_THREAD_SAFETY_TEST "Run massively parallel DGEMM tests to confirm thread safety of the library (requires about 1.3GB of RAM)" OFF)
+option(CPP_THREAD_SAFETY_USE_OPENMP "Use OpenMP to launch the C++ thread safety tests" ON)
 
-option(CPP_THREAD_SAFETY_GEMV "Run a massively parallel DGEMV test to confirm thread safety of the library (requires OpenMP)" OFF)
+option(CPP_THREAD_SAFETY_GEMV "Run a massively parallel DGEMV test to confirm thread safety of the library" OFF)
 option(BUILD_STATIC_LIBS "Build static library" OFF)
+option(BUILD_SHARED_LIBS "Build shared library" OFF)
 if(NOT BUILD_STATIC_LIBS AND NOT BUILD_SHARED_LIBS)
   set(BUILD_STATIC_LIBS ON CACHE BOOL "Build static library" FORCE)
 endif()
@@ -70,9 +79,24 @@ set(SYMBOLPREFIX "" CACHE STRING  "Add a prefix to all exported symbol names in 
 
 set(SYMBOLSUFFIX "" CACHE STRING  "Add a suffix to all exported symbol names in the shared library, e.g. _64 for INTERFACE64 builds" )
 
+if (CMAKE_SYSTEM_NAME MATCHES "Windows" AND BUILD_SHARED_LIBS AND NOT ("${SYMBOLPREFIX}${SYMBOLSUFFIX}" STREQUAL ""))
+set (DELETE_STATIC_LIBS "")
+if (NOT BUILD_STATIC_LIBS)
+	message (STATUS "forcing build of a temporary static library for symbol renaming")
+	set (BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared library" FORCE)
+	set (BUILD_STATIC_LIBS ON CACHE BOOL "Build static library" FORCE)
+	set (DELETE_STATIC_LIBS  file (REMOVE $<TARGET_FILE_DIR:${OpenBLAS_LIBNAME}_static>/${OpenBLAS_LIBNAME}.lib))
+endif ()
+endif()
+
+
 #######
 if(BUILD_WITHOUT_LAPACK)
   set(NO_LAPACK 1)
+  set(NO_LAPACKE 1)
+endif()
+
+if (BUILD_WITHOUT_LAPACKE)
   set(NO_LAPACKE 1)
 endif()
 
@@ -101,7 +125,12 @@ message(WARNING "CMake support is experimental. It does not yet support all buil
 include("${PROJECT_SOURCE_DIR}/cmake/utils.cmake")
 include("${PROJECT_SOURCE_DIR}/cmake/system.cmake")
 
-set(OpenBLAS_LIBNAME ${LIBNAMEPREFIX}openblas${LIBNAMESUFFIX}${SUFFIX64_UNDERSCORE})
+string(FIND "${LIBNAMESUFFIX}" "${SUFFIX64_UNDERSCORE}" HAVE64)
+if (${HAVE64} GREATER -1)
+	set(OpenBLAS_LIBNAME ${LIBNAMEPREFIX}openblas${LIBNAMESUFFIX})
+else ()
+	set(OpenBLAS_LIBNAME ${LIBNAMEPREFIX}openblas${LIBNAMESUFFIX}${SUFFIX64_UNDERSCORE})
+endif ()
 
 set(BLASDIRS interface driver/level2 driver/level3 driver/others)
 
@@ -123,6 +152,9 @@ endif ()
 
 if (NOT DEFINED BUILD_BFLOAT16)
  set (BUILD_BFLOAT16 false)
+endif ()
+if (NOT DEFINED BUILD_HFLOAT16)
+ set (BUILD_HFLOAT16 false)
 endif ()
 # set which float types we want to build for
 if (NOT DEFINED BUILD_SINGLE AND NOT DEFINED BUILD_DOUBLE AND NOT DEFINED BUILD_COMPLEX AND NOT DEFINED BUILD_COMPLEX16)
@@ -212,9 +244,47 @@ if (${DYNAMIC_ARCH})
   endforeach()
 endif ()
 
+# Work around Apple issue with "argument list too long" when linking.
+# Seen for DYNAMIC_ARCH when there are a _LOT_ of variants build, previously
+# mostly with older versions on POWERPC or Intel CPUs, but with newer ARM
+# CPUs and newer compilers this will also occur on ARM.
+#
+# This must happen before the add_library() calls, otherwise this will have
+# no effect.
+#
+# Unfortunately, while this workaround will work for shared libraries (with
+# either Ninja oder Unix Makefiles), but not for static libraries, as ar
+# does not accept response files. So for the case where we (also) build
+# static libraries we need an additional workaround, see below. (The
+# generation of the response files by CMake must still be enabled, so this
+# is required regardless.)
+if(APPLE)
+  set(CMAKE_C_USE_RESPONSE_FILE_FOR_OBJECTS ON)
+  set(CMAKE_C_USE_RESPONSE_FILE_FOR_LIBRARIES ON)
+  if(NOT NOFORTRAN)
+    set(CMAKE_Fortran_USE_RESPONSE_FILE_FOR_OBJECTS ON)
+    set(CMAKE_Fortran_USE_RESPONSE_FILE_FOR_LIBRARIES ON)
+    # NAG Fortran does not support the GCC-specific -x f95-cpp-input flag
+    # used in the shared library link rule below.  Override
+    # CMAKE_Fortran_CREATE_SHARED_LIBRARY early (before targets are defined)
+    # to use the C compiler link rule instead; the shared library contains
+    # only C and assembler objects so this is safe.
+    if(CMAKE_Fortran_COMPILER_ID MATCHES "NAG")
+      set(CMAKE_Fortran_CREATE_SHARED_LIBRARY ${CMAKE_C_CREATE_SHARED_LIBRARY})
+    endif()
+  endif()
+  set(CMAKE_NINJA_FORCE_RESPONSE_FILE ON)
+endif()
+
 # add objects to the openblas lib
 if(NOT NO_LAPACK)
   add_library(LAPACK_OVERRIDES OBJECT ${LA_SOURCES})
+  if (USE_OPENMP AND (NOT NOFORTRAN))
+    # Disable OpenMP for LAPACK Fortran codes on Windows.
+    if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+      target_link_libraries(LAPACK_OVERRIDES OpenMP::OpenMP_Fortran)
+    endif()
+  endif()
   list(APPEND TARGET_OBJS "$<TARGET_OBJECTS:LAPACK_OVERRIDES>")
 endif()
 if(NOT NO_LAPACKE)
@@ -254,23 +324,85 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "AIX|Android|Linux|FreeBSD|OpenBSD|NetBSD|Drago
   endif()
 endif()
 
-# Seems that this hack doesn't required since macOS 11 Big Sur
-if (APPLE AND BUILD_SHARED_LIBS AND CMAKE_HOST_SYSTEM_VERSION VERSION_LESS 20)
-  set (CMAKE_C_USE_RESPONSE_FILE_FOR_OBJECTS 1)
-  if (NOT NOFORTRAN)
-  set (CMAKE_Fortran_USE_RESPONSE_FILE_FOR_OBJECTS 1)
-  set (CMAKE_Fortran_CREATE_SHARED_LIBRARY
- "sh -c 'cat ${CMAKE_BINARY_DIR}/CMakeFiles/openblas_shared.dir/objects*.rsp | xargs -n 1024 ${CMAKE_AR} -ru libopenblas.a && exit 0' "
- "sh -c '${CMAKE_AR} -rs libopenblas.a ${CMAKE_BINARY_DIR}/driver/others/CMakeFiles/driver_others.dir/xerbla.c.o && exit 0' "
- "sh -c 'echo \"\" | ${CMAKE_Fortran_COMPILER} -o dummy.o -c -x f95-cpp-input - '"
- "sh -c '${CMAKE_Fortran_COMPILER} -fpic -shared -Wl,-all_load -Wl,-force_load,libopenblas.a -Wl,-noall_load dummy.o -o ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libopenblas.${OpenBLAS_MAJOR_VERSION}.${OpenBLAS_MINOR_VERSION}.dylib'"
- "sh -c 'ls -l ${CMAKE_BINARY_DIR}/lib'")
-  else ()
-  set (CMAKE_C_CREATE_SHARED_LIBRARY
-   "sh -c 'cat ${CMAKE_BINARY_DIR}/CMakeFiles/openblas_shared.dir/objects*.rsp | xargs -n 1024 ${CMAKE_AR} -ru libopenblas.a && exit 0' "
-   "sh -c '${CMAKE_AR} -rs libopenblas.a ${CMAKE_BINARY_DIR}/driver/others/CMakeFiles/driver_others.dir/xerbla.c.o && exit 0' "
-   "sh -c '${CMAKE_C_COMPILER} -fpic -shared -Wl,-all_load -Wl,-force_load,libopenblas.a -Wl,-noall_load -o ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libopenblas.${OpenBLAS_MAJOR_VERSION}.${OpenBLAS_MINOR_VERSION}.dylib'")
-  endif ()
+if (USE_OPENMP)
+  if(BUILD_STATIC_LIBS)
+    if(NOFORTRAN)
+      target_link_libraries(${OpenBLAS_LIBNAME}_static OpenMP::OpenMP_C)
+    else()
+      target_link_libraries(${OpenBLAS_LIBNAME}_static OpenMP::OpenMP_C OpenMP::OpenMP_Fortran)
+    endif()
+  endif()
+  if(BUILD_SHARED_LIBS)
+    if(NOFORTRAN)
+      target_link_libraries(${OpenBLAS_LIBNAME}_shared OpenMP::OpenMP_C)
+    else()
+      target_link_libraries(${OpenBLAS_LIBNAME}_shared OpenMP::OpenMP_C OpenMP::OpenMP_Fortran)
+    endif()
+  endif()
+endif()
+
+# Second part of "Argument list too long" fix when static libraries are
+# built. See above for details.
+if(APPLE AND BUILD_STATIC_LIBS)
+  # Always build static library first
+  set(STATIC_PATH "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/lib${OpenBLAS_LIBNAME}.a")
+  # Handle differences in how many response files are generated and/or where
+  # they are stored for Ninja / Unix Makefiles.
+  if("${CMAKE_GENERATOR}" MATCHES "Ninja")
+    set(CREATE_STATIC_LIBRARY_COMMAND
+      "sh -c 'cat ${CMAKE_BINARY_DIR}/CMakeFiles/openblas_static.rsp | xargs -n 1024 ${CMAKE_AR} -ru ${STATIC_PATH} && exit 0' "
+      "sh -c '${CMAKE_AR} -rs ${STATIC_PATH} ${CMAKE_BINARY_DIR}/driver/others/CMakeFiles/driver_others.dir/xerbla.c.o && exit 0' ")
+  else()
+    set(CREATE_STATIC_LIBRARY_COMMAND
+      "sh -c 'cat ${CMAKE_BINARY_DIR}/CMakeFiles/${OpenBLAS_LIBNAME}_static.dir/objects*.rsp | xargs -n 1024 ${CMAKE_AR} -ru ${STATIC_PATH} && exit 0' "
+      "sh -c '${CMAKE_AR} -rs ${STATIC_PATH} ${CMAKE_BINARY_DIR}/driver/others/CMakeFiles/driver_others.dir/xerbla.c.o && exit 0' ")
+  endif()
+  if(BUILD_SHARED_LIBS)
+    add_dependencies(${OpenBLAS_LIBNAME}_shared ${OpenBLAS_LIBNAME}_static)
+    set(SHARED_PATH "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libopenblas.${OpenBLAS_MAJOR_VERSION}.${OpenBLAS_MINOR_VERSION}.dylib")
+  endif()
+  if(USE_OPENMP)
+    get_target_property(OMP_LIB OpenMP::OpenMP_C INTERFACE_LINK_LIBRARIES)
+  else()
+    set(OMP_LIB "")
+  endif()
+  if(NOT NOFORTRAN)
+    set(CMAKE_Fortran_CREATE_STATIC_LIBRARY ${CREATE_STATIC_LIBRARY_COMMAND})
+    if(BUILD_SHARED_LIBS)
+      if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
+        set(CMAKE_Fortran_CREATE_SHARED_LIBRARY
+          "sh -c 'echo \"\" | ${CMAKE_Fortran_COMPILER} -o dummy.o -c -x f95-cpp-input - '"
+          "sh -c '${CMAKE_Fortran_COMPILER} -fpic -shared -Wl,-all_load -Wl,-force_load,${STATIC_PATH} dummy.o -o ${SHARED_PATH} ${OMP_LIB}'")
+      elseif(CMAKE_Fortran_COMPILER_ID MATCHES "NAG")
+        # NAG does not support -x f95-cpp-input, and macOS needs -dynamiclib
+        # rather than -Wl,-shared.  Use the C compiler as the linker driver
+        # and add the NAG Fortran runtime so NAGf90_* symbols resolve.
+        # Locate the NAG Fortran runtime (libf<XY>rts) without hardcoding the
+        # version digits: NAG 7.1 ships libf71rts, 7.2 ships libf72rts, etc.
+        get_filename_component(_NAG_FC_DIR "${CMAKE_Fortran_COMPILER}" DIRECTORY)
+        set(_NAG_RTS_DIR "${_NAG_FC_DIR}/../lib/NAG_Fortran")
+        file(GLOB _NAG_RTS_CANDIDATES
+             "${_NAG_RTS_DIR}/libf*rts.dylib"
+             "${_NAG_RTS_DIR}/libf*rts.a")
+        if(_NAG_RTS_CANDIDATES)
+          list(GET _NAG_RTS_CANDIDATES 0 _NAG_RTS_LIB)
+          get_filename_component(_NAG_RTS_NAME "${_NAG_RTS_LIB}" NAME_WE)
+          string(REGEX REPLACE "^lib" "" _NAG_RTS_LIBNAME "${_NAG_RTS_NAME}")
+          set(_NAG_RTS_FLAGS "-L${_NAG_RTS_DIR} -l${_NAG_RTS_LIBNAME}")
+        else()
+          set(_NAG_RTS_FLAGS "")
+        endif()
+        set(CMAKE_Fortran_CREATE_SHARED_LIBRARY
+          "sh -c '${CMAKE_C_COMPILER} -dynamiclib -Wl,-all_load -Wl,-force_load,${STATIC_PATH} -o ${SHARED_PATH} ${OMP_LIB} ${_NAG_RTS_FLAGS}'")
+      endif()
+    endif()
+  else()
+    set(CMAKE_C_CREATE_STATIC_LIBRARY ${CREATE_STATIC_LIBRARY_COMMAND})
+    if(BUILD_SHARED_LIBS)
+      set(CMAKE_C_CREATE_SHARED_LIBRARY
+	"sh -c '${CMAKE_C_COMPILER} -fpic -shared -Wl,-all_load -Wl,-force_load,${STATIC_PATH} -o ${SHARED_PATH} ${OMP_LIB}'")
+    endif()
+  endif()
 endif()
 
 # Handle MSVC exports
@@ -328,7 +460,7 @@ if (NOT NOFORTRAN)
   # Build test and ctest
   add_subdirectory(test)
  endif()
-  if (BUILD_TESTING)
+ if (BUILD_TESTING AND NOT BUILD_WITHOUT_LAPACK)
     add_subdirectory(lapack-netlib/TESTING)
   endif()
 endif()
@@ -355,7 +487,7 @@ if (BUILD_SHARED_LIBS AND BUILD_RELAPACK)
   endif()
 endif()
 
-if (BUILD_SHARED_LIBS AND NOT ${SYMBOLPREFIX}${SYMBOLSUFFIX} STREQUAL "")
+if (BUILD_SHARED_LIBS OR DELETE_STATIC_LIBS AND NOT ${SYMBOLPREFIX}${SYMBOLSUFFIX} STREQUAL "")
   if (NOT DEFINED ARCH)
     set(ARCH_IN "x86_64")
   else()
@@ -423,6 +555,11 @@ if (BUILD_SHARED_LIBS AND NOT ${SYMBOLPREFIX}${SYMBOLSUFFIX} STREQUAL "")
   else ()
 	  set (BBF16 0)
   endif()
+  if (${BUILD_HFLOAT16})
+	  set (BHF16 1)
+  else ()
+	  set (BHF16 0)
+  endif()
   if (${BUILD_SINGLE})
 	  set (BS 1)
   else ()
@@ -443,21 +580,100 @@ if (BUILD_SHARED_LIBS AND NOT ${SYMBOLPREFIX}${SYMBOLSUFFIX} STREQUAL "")
   else ()
 	  set (BZ 0)
   endif()
+
+  if (CMAKE_SYSTEM_NAME MATCHES "Windows")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+if (CMAKE_BUILD_TYPE MATCHES "Debug")
+set (CRTLIB msvcrtd)
+set (PDBOPT -debug -pdb:$<TARGET_FILE_DIR:${OpenBLAS_LIBNAME}_static>/${OpenBLAS_LIBNAME}.pdb)
+set (PDB_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+else ()
+set (CRTLIB msvcrt)
+set (PDBOPT "")
+endif()
+ #if (USE_PERL)
+message(STATUS "adding postbuild instruction to rename syms")
+  add_custom_command(TARGET ${OpenBLAS_LIBNAME}_static POST_BUILD
+	COMMAND perl ${PROJECT_SOURCE_DIR}/exports/gensymbol.pl "win2k" "${ARCH}" "${BU}" "${EXPRECISION_IN}" "${NO_CBLAS_IN}" "${NO_LAPACK_IN}" "${NO_LAPACKE_IN}" "${NEED2UNDERSCORES_IN}" "${ONLY_CBLAS_IN}" "${SYMBOLPREFIX}" "${SYMBOLSUFFIX}" "${BLD}" "${BBF16}" "${BHF16}" "${BS}" "${BD}" "${BC}" "${BZ}" > ${PROJECT_BINARY_DIR}/renamesyms.def
+	COMMAND ${CMAKE_C_COMPILER} ${CMAKE_C_FLAGS} -I${PROJECT_SOURCE_DIR} -I${PROJECT_BINARY_DIR} -c -o ${PROJECT_BINARY_DIR}/dllinit.o ${PROJECT_SOURCE_DIR}/exports/dllinit.c
+	COMMAND lld-link -nodefaultlib:libcmt -defaultlib:${CRTLIB} ${CMAKE_LINKER_FLAGS} -errorlimit:0 -def:${PROJECT_BINARY_DIR}/renamesyms.def ${PROJECT_BINARY_DIR}/dllinit.o $<TARGET_FILE:${OpenBLAS_LIBNAME}_static> -wholearchive:$<TARGET_FILE:${OpenBLAS_LIBNAME}_static> -dll -out:$<TARGET_FILE_DIR:${OpenBLAS_LIBNAME}_static>/${OpenBLAS_LIBNAME}.dll -implib:$<TARGET_FILE_DIR:${OpenBLAS_LIBNAME}_static>/${OpenBLAS_LIBNAME}.dll.a ${PDBOPT} 
+	#COMMAND lld-link -nodefaultlib:libcmt -defaultlib:msvcrt ${CMAKE_LINKER_FLAGS} -errorlimit:0 -def:${PROJECT_BINARY_DIR}/renamesyms.def ${PROJECT_BINARY_DIR}/dllinit.o $<TARGET_FILE:${OpenBLAS_LIBNAME}_static> -wholearchive:$<TARGET_FILE:${OpenBLAS_LIBNAME}_static> -dll -out:$<TARGET_FILE_DIR:${OpenBLAS_LIBNAME}_static>/${OpenBLAS_LIBNAME}.dll -implib:$<TARGET_FILE_DIR:${OpenBLAS_LIBNAME}_static>/${OpenBLAS_LIBNAME}.dll.a
+	 ${REMOVE_STATIC_LIB} VERBATIM
+  )
+  #endif ()
+  else ()
   if (NOT USE_PERL)
   add_custom_command(TARGET ${OpenBLAS_LIBNAME}_shared POST_BUILD
-	  COMMAND  ${PROJECT_SOURCE_DIR}/exports/gensymbol "objcopy" "${ARCH}" "${BU}" "${EXPRECISION_IN}" "${NO_CBLAS_IN}" "${NO_LAPACK_IN}" "${NO_LAPACKE_IN}" "${NEED2UNDERSCORES_IN}" "${ONLY_CBLAS_IN}" \"${SYMBOLPREFIX}\" \"${SYMBOLSUFFIX}\" "${BLD}" "${BBF16}" "${BS}" "${BD}" "${BC}" "${BZ}" > ${PROJECT_BINARY_DIR}/objcopy.def
-    COMMAND objcopy -v --redefine-syms ${PROJECT_BINARY_DIR}/objcopy.def  ${PROJECT_BINARY_DIR}/lib/lib${OpenBLAS_LIBNAME}.so
+	  COMMAND sh ${PROJECT_SOURCE_DIR}/exports/gensymbol "objcopy" "${ARCH}" "${BU}" "${EXPRECISION_IN}" "${NO_CBLAS_IN}" "${NO_LAPACK_IN}" "${NO_LAPACKE_IN}" "${NEED2UNDERSCORES_IN}" "${ONLY_CBLAS_IN}" \"${SYMBOLPREFIX}\" \"${SYMBOLSUFFIX}\" "${BLD}" "${BBF16}" "${BHF16}" "${BS}" "${BD}" "${BC}" "${BZ}" > ${PROJECT_BINARY_DIR}/objcopy.def
+    COMMAND objcopy --redefine-syms ${PROJECT_BINARY_DIR}/objcopy.def  ${PROJECT_BINARY_DIR}/lib/${OpenBLAS_LIBNAME}.so
     COMMENT "renaming symbols"
     )
   else()
   add_custom_command(TARGET ${OpenBLAS_LIBNAME}_shared POST_BUILD
-    COMMAND perl ${PROJECT_SOURCE_DIR}/exports/gensymbol.pl "objcopy" "${ARCH}" "${BU}" "${EXPRECISION_IN}" "${NO_CBLAS_IN}" "${NO_LAPACK_IN}" "${NO_LAPACKE_IN}" "${NEED2UNDERSCORES_IN}" "${ONLY_CBLAS_IN}" \"${SYMBOLPREFIX}\" \"${SYMBOLSUFFIX}\" "${BLD}" "${BBF16}" "${BS}" "${BD}" "${BC}" "${BZ}" > ${PROJECT_BINARY_DIR}/objcopy.def
-    COMMAND objcopy -v --redefine-syms ${PROJECT_BINARY_DIR}/objcopy.def  ${PROJECT_BINARY_DIR}/lib/lib${OpenBLAS_LIBNAME}.so
+    COMMAND perl ${PROJECT_SOURCE_DIR}/exports/gensymbol.pl "objcopy" "${ARCH}" "${BU}" "${EXPRECISION_IN}" "${NO_CBLAS_IN}" "${NO_LAPACK_IN}" "${NO_LAPACKE_IN}" "${NEED2UNDERSCORES_IN}" "${ONLY_CBLAS_IN}" \"${SYMBOLPREFIX}\" \"${SYMBOLSUFFIX}\" "${BLD}" "${BBF16}" "${BHF16}" "${BS}" "${BD}" "${BC}" "${BZ}" > ${PROJECT_BINARY_DIR}/objcopy.def
+    COMMAND objcopy --redefine-syms ${PROJECT_BINARY_DIR}/objcopy.def  ${PROJECT_BINARY_DIR}/lib/lib${OpenBLAS_LIBNAME}.so
     COMMENT "renaming symbols"
     )
   endif()
 endif()
+endif()
 
+if (BUILD_BENCHMARKS)
+	#find_package(OpenMP REQUIRED)
+  file(GLOB SOURCES "benchmark/*.c")
+  if (NOT USE_OPENMP)
+  file(GLOB REMFILE "benchmark/smallscaling.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  endif()
+  if (BUILD_WITHOUT_LAPACK)
+  file(GLOB REMFILE "benchmark/cholesky.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  file(GLOB REMFILE "benchmark/geev.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  file(GLOB REMFILE "benchmark/gesv.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  file(GLOB REMFILE "benchmark/getri.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  file(GLOB REMFILE "benchmark/potrf.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  file(GLOB REMFILE "benchmark/spmv.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  file(GLOB REMFILE "benchmark/symv.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  file(GLOB REMFILE "benchmark/linpack.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  endif()
+  if (NOT USE_GEMM3M)
+  file(GLOB REMFILE "benchmark/gemm3m.c")
+  list(REMOVE_ITEM SOURCES ${REMFILE})
+  endif()
+  foreach(source ${SOURCES})
+    get_filename_component(name ${source} NAME_WE)
+    if ((NOT ${name} STREQUAL "zdot-intel") AND (NOT ${name} STREQUAL "cula_wrapper"))
+        set(defines DEFAULT COMPLEX DOUBLE "COMPLEX\;DOUBLE")
+      foreach(define ${defines})
+        set(target_name "benchmark_${name}")
+        if (NOT "${define}" STREQUAL "DEFAULT")
+          string(JOIN "_" define_str ${define})
+          set(target_name "${target_name}_${define_str}")
+        endif()
+        if ((NOT ${target_name} STREQUAL "benchmark_imax_COMPLEX") AND (NOT ${target_name} STREQUAL "benchmark_imax_COMPLEX_DOUBLE") AND
+            (NOT ${target_name} STREQUAL "benchmark_imin_COMPLEX") AND (NOT ${target_name} STREQUAL "benchmark_imin_COMPLEX_DOUBLE") AND
+            (NOT ${target_name} STREQUAL "benchmark_max_COMPLEX") AND (NOT ${target_name} STREQUAL "benchmark_max_COMPLEX_DOUBLE") AND
+            (NOT ${target_name} STREQUAL "benchmark_min_COMPLEX") AND (NOT ${target_name} STREQUAL "benchmark_min_COMPLEX_DOUBLE"))
+          add_executable(${target_name} ${source})
+          target_include_directories(${target_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+	    target_link_libraries(${target_name} ${OpenBLAS_LIBNAME} )
+	  #  target_link_libraries(${target_name} ${OpenBLAS_LIBNAME} OpenMP::OpenMP_C)
+          if (NOT "${define}" STREQUAL "DEFAULT")
+            target_compile_definitions(${target_name} PRIVATE ${define})
+          endif()
+        endif()
+      endforeach()
+    endif()
+  endforeach()
+endif()
 
 
 # Install project
@@ -549,6 +765,39 @@ if(NOT NO_LAPACKE)
   COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/lapack-netlib/LAPACKE/include/lapacke_mangling_with_flags.h.in "${CMAKE_BINARY_DIR}/lapacke_mangling.h"
   )
   install (FILES ${CMAKE_BINARY_DIR}/lapacke_mangling.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  if (NOT (x${SYMBOLPREFIX}${SYMBOLSUFFIX} STREQUAL "x"))
+  message (STATUS "Generating lapacke.h in ${CMAKE_INSTALL_INCLUDEDIR}")
+  set(LAPACKE_H ${CMAKE_BINARY_DIR}/generated/lapacke.h)
+  file(READ ${CMAKE_CURRENT_SOURCE_DIR}/lapack-netlib/LAPACKE/include/lapacke.h LAPACKE_H_CONTENTS)
+  if (NOT ${SYMBOLPREFIX} STREQUAL "")
+	  string(REGEX REPLACE "(LAPACKE_*)" " ${SYMBOLPREFIX}\\1" LAPACKE_H_CONTENTS_NEW	"${LAPACKE_H_CONTENTS}")
+	  string(REPLACE "_ ${SYMBOLPREFIX}LAPACKE_H_"  "_LAPACKE_H_" LAPACKE_H_CONTENTS ${LAPACKE_H_CONTENTS_NEW})
+	  string(REPLACE "${SYMBOLPREFIX}LAPACKE_malloc"  "LAPACKE_malloc" LAPACKE_H_CONTENTS_NEW ${LAPACKE_H_CONTENTS})
+	  string(REPLACE "${SYMBOLPREFIX}LAPACKE_free"  "LAPACKE_free" LAPACKE_H_CONTENTS ${LAPACKE_H_CONTENTS_NEW})
+	  set(LAPACKE_H_CONTENTS_NEW ${LAPACKE_H_CONTENTS})
+  endif()
+  if (NOT ${SYMBOLSUFFIX} STREQUAL "")
+	  string(REGEX REPLACE "(${SYMBOLPREFIX}LAPACKE_[a-z1-9]*[^ (]*)" "\\1${SYMBOLSUFFIX}" LAPACKE_H_CONTENTS_NEW	"${LAPACKE_H_CONTENTS}")
+	  string(REPLACE "#define${SYMBOLSUFFIX}"  "#define" LAPACKE_H_CONTENTS ${LAPACKE_H_CONTENTS_NEW})
+	  string(REPLACE "LAPACKE_malloc${SYMBOLSUFFIX}"  "LAPACKE_malloc" LAPACKE_H_CONTENTS_NEW ${LAPACKE_H_CONTENTS})
+	  string(REPLACE "LAPACKE_free${SYMBOLSUFFIX}"  "LAPACKE_free" LAPACKE_H_CONTENTS ${LAPACKE_H_CONTENTS_NEW})
+	  set(LAPACKE_H_CONTENTS_NEW ${LAPACKE_H_CONTENTS})
+  endif()
+  file(WRITE ${LAPACKE_H} "${LAPACKE_H_CONTENTS_NEW}")
+  install (FILES ${LAPACKE_H} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  message (STATUS "Generating lapack.h in ${CMAKE_INSTALL_INCLUDEDIR}")
+  set(LAPACK_H ${CMAKE_BINARY_DIR}/generated/lapack.h)
+  file(READ ${CMAKE_CURRENT_SOURCE_DIR}/lapack-netlib/LAPACKE/include/lapack.h LAPACK_H_CONTENTS)
+  if (NOT ${SYMBOLPREFIX} STREQUAL "")
+	  string(REGEX REPLACE "(LAPACK_[a-z1-9]*[ \(][.\)]*)" "${SYMBOLPREFIX}\\1" LAPACK_H_CONTENTS_NEW	"${LAPACK_H_CONTENTS}")
+	  set(LAPACK_H_CONTENTS ${LAPACK_H_CONTENTS_NEW})
+  endif()
+  if (NOT ${SYMBOLSUFFIX} STREQUAL "")
+	  string(REGEX REPLACE "(${SYMBOLPREFIX}LAPACK_[a-z1-9]*)([ \(].\)" "\\1${SYMBOLSUFFIX}\\2" LAPACK_H_CONTENTS_NEW	"${LAPACK_H_CONTENTS}")
+  endif()
+  file(WRITE ${LAPACK_H} "${LAPACK_H_CONTENTS_NEW}")
+  install (FILES ${LAPACK_H} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
 endif()
 
 # Install pkg-config files

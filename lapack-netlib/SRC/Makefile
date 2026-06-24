@@ -85,7 +85,7 @@ ALLAUX_O = ilaenv.o ilaenv2stage.o ieeeck.o lsamen.o xerbla.o xerbla_array.o \
    ../INSTALL/ilaver.o ../INSTALL/lsame.o ../INSTALL/slamch.o
 
 ifneq "$(or $(BUILD_SINGLE),$(BUILD_COMPLEX))" ""
-SCLAUX = la_constants.o \
+SCLAUX_O = la_constants.o \
    sbdsvdx.o sstevx.o sstein.o \
    sbdsdc.o \
    sbdsqr.o sdisna.o slabad.o slacpy.o sladiv.o slae2.o  slaebz.o \
@@ -101,14 +101,12 @@ SCLAUX = la_constants.o \
    slaset.o slasq1.o slasq2.o slasq3.o slasq4.o slasq5.o slasq6.o \
    slasr.o  slasrt.o slassq.o slasv2.o spttrf.o sstebz.o sstedc.o \
    ssteqr.o ssterf.o slaisnan.o sisnan.o \
-   slartgp.o slartgs.o scombssq.o ../INSTALL/sroundup_lwork.o
-ifneq ($(F_COMPILER), IBM)
-SCLAUX += ../INSTALL/second_$(TIMER).o
-endif
+   slartgp.o slartgs.o scombssq.o ../INSTALL/sroundup_lwork.o \
+   ../INSTALL/second_$(TIMER).o
 endif
 
 ifneq "$(or $(BUILD_DOUBLE),$(BUILD_COMPLEX16))" ""
-DZLAUX = la_constants.o\
+DZLAUX_O = la_constants.o\
    dcombssq.o \
    dbdsvdx.o dstevx.o dstein.o \
    dbdsdc.o \
@@ -126,10 +124,7 @@ DZLAUX = la_constants.o\
    dlasr.o  dlasrt.o dlassq.o dlasv2.o dpttrf.o dstebz.o dstedc.o \
    dsteqr.o dsterf.o dlaisnan.o disnan.o \
    dlartgp.o dlartgs.o ../INSTALL/droundup_lwork.o \
-   ../INSTALL/dlamch.o
-ifneq ($(F_COMPILER), IBM)
-DZLAUX +=  ../INSTALL/dsecnd_$(TIMER).o
-endif
+   ../INSTALL/dlamch.o ../INSTALL/dsecnd_$(TIMER).o
 endif
 
 #ifeq ($(BUILD_SINGLE),1)
@@ -160,7 +155,7 @@ SLASRC_O = \
    slaqr0.o slaqr1.o slaqr2.o slaqr3.o slaqr4.o slaqr5.o \
    slaqtr.o slar1v.o slar2v.o ilaslr.o ilaslc.o \
    slarf.o  slarfb.o slarfb_gett.o slarfg.o slarfgp.o slarft.o slarfx.o slarfy.o slargv.o \
-   slarrv.o slartv.o \
+   slarf1f.o slarf1l.o slarrv.o slartv.o \
    slarz.o  slarzb.o slarzt.o slaswp.o slasy2.o slasyf.o slasyf_rook.o \
    slasyf_rk.o \
    slatbs.o slatdf.o slatps.o slatrd.o slatrs.o slatrz.o \
@@ -276,6 +271,7 @@ CLASRC_O = \
    claqsp.o claqsy.o clar1v.o clar2v.o ilaclr.o ilaclc.o \
    claqz0.o claqz1.o claqz2.o claqz3.o \
    clarf.o  clarfb.o clarfb_gett.o clarfg.o clarft.o clarfgp.o \
+   clarf1f.o clarf1l.o \
    clarfx.o clarfy.o clargv.o clarnv.o clarrv.o clartg.o clartv.o \
    clarz.o  clarzb.o clarzt.o clascl.o claset.o clasr.o  classq.o \
    claswp.o clasyf.o clasyf_rook.o clasyf_rk.o clasyf_aa.o \
@@ -369,7 +365,7 @@ DLASRC_O = \
    dlaqr0.o dlaqr1.o dlaqr2.o dlaqr3.o dlaqr4.o dlaqr5.o \
    dlaqtr.o dlar1v.o dlar2v.o iladlr.o iladlc.o \
    dlarf.o  dlarfb.o dlarfb_gett.o dlarfg.o dlarfgp.o dlarft.o dlarfx.o dlarfy.o \
-   dlargv.o dlarrv.o dlartv.o \
+   dlarf1f.o dlarf1l.o dlargv.o dlarrv.o dlartv.o \
    dlarz.o  dlarzb.o dlarzt.o dlaswp.o dlasy2.o \
    dlasyf.o dlasyf_rook.o dlasyf_rk.o \
    dlatbs.o dlatdf.o dlatps.o dlatrd.o dlatrs.o dlatrz.o dlauu2.o \
@@ -483,7 +479,7 @@ ZLASRC_O = \
    zlaqsp.o zlaqsy.o zlar1v.o zlar2v.o ilazlr.o ilazlc.o \
    zlaqz0.o zlaqz1.o zlaqz2.o zlaqz3.o \
    zlarcm.o zlarf.o  zlarfb.o zlarfb_gett.o \
-   zlarfg.o zlarft.o zlarfgp.o \
+   zlarfg.o zlarft.o zlarfgp.o zlarf1f.o zlarf1l.o \
    zlarfx.o zlarfy.o zlargv.o zlarnv.o zlarrv.o zlartg.o zlartv.o \
    zlarz.o  zlarzb.o zlarzt.o zlascl.o zlaset.o zlasr.o \
    zlassq.o zlaswp.o zlasyf.o zlasyf_rook.o zlasyf_rk.o zlasyf_aa.o \
@@ -577,6 +573,8 @@ endif
 
 # filter out optimized codes from OpenBLAS
 ALL_AUX_OBJS = xerbla.o ../INSTALL/lsame.o
+SCL_AUX_OBJS = slaed3.o
+DZL_AUX_OBJS = dlaed3.o
 
 SLAPACKOBJS     = \
         sgetrf.o sgetrs.o spotrf.o sgetf2.o \
@@ -603,6 +601,8 @@ ZLAPACKOBJS     = \
 	zsymv.o zsyr.o zspmv.o zspr.o
 
 ALLAUX = $(filter-out $(ALL_AUX_OBJS),$(ALLAUX_O))
+SCLAUX = $(filter-out $(SCL_AUX_OBJS),$(SCLAUX_O))
+DZLAUX = $(filter-out $(DZL_AUX_OBJS),$(DZLAUX_O))
 SLASRC = $(filter-out $(SLAPACKOBJS),$(SLASRC_O))
 DLASRC = $(filter-out $(DLAPACKOBJS),$(DLASRC_O))
 CLASRC = $(filter-out $(CLAPACKOBJS),$(CLASRC_O))
@@ -673,7 +673,7 @@ FRC:
 .PHONY: clean cleanobj cleanlib
 clean: cleanobj cleanlib
 cleanobj:
-	rm -f *.o DEPRECATED/*.o
+	rm -f *.o *.mod DEPRECATED/*.o DEPRECATED/*.mod
 cleanlib:
 	rm -f $(LAPACKLIB)
 

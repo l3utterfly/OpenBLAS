@@ -134,7 +134,7 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	"	fadd	v4.4s, v4.4s, v6.4s		\n"	\
 	"	fadd	v0.4s, v0.4s, v4.4s		\n"	\
 	"	faddp	v0.4s, v0.4s, v0.4s		\n"	\
-	"	faddp	v0.4s, v0.4s, v0.4s		\n"
+	"	faddp	"OUT", v0.2s			\n"
 
 #else /* !defined(DSDOT) */
 #define KERNEL_F1						\
@@ -262,7 +262,10 @@ USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 static RETURN_TYPE dot_kernel_asimd(BLASLONG n, FLOAT *x, BLASLONG inc_x, FLOAT *y, BLASLONG inc_y)
 {
-	RETURN_TYPE  dot = 0.0;
+#ifndef DOUBLE
+    volatile
+#endif
+    RETURN_TYPE  dot = 0.0;
 	BLASLONG j = 0;
 
 	__asm__ __volatile__ (
@@ -285,8 +288,9 @@ static RETURN_TYPE dot_kernel_asimd(BLASLONG n, FLOAT *x, BLASLONG inc_x, FLOAT 
 	"	asr	%[J_], %[N_], #"N_DIV_SHIFT"	\n"
 	"	cmp	%[J_], xzr			\n"
 	"	beq	3f //dot_kernel_F1		\n"
-
+#if !(defined(__clang__) && defined(OS_WINDOWS))
 	"	.align 5				\n"
+#endif
 	"2: //dot_kernel_F:				\n"
 	"	"KERNEL_F"				\n"
 	"	subs	%[J_], %[J_], #1		\n"

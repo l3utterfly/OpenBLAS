@@ -402,16 +402,18 @@ CTEST(idamin, min_idx_in_vec_tail){
 CTEST(idamin, min_idx_in_vec_tail_inc_1){
    blasint i;
    blasint N = ELEMENTS, inc = 1;
-   double x[ELEMENTS * inc];
+   double *x = (double*)malloc(ELEMENTS * inc * sizeof(double));
    for (i = 0; i < N * inc; i ++) {
       x[i] = i + 1000;
    }
 
    x[(N - 1) * inc] = 0.0f;
    blasint index = BLASFUNC(idamin)(&N, x, &inc);
+   free(x);
    ASSERT_EQUAL(N, index);
 }
 
+#ifndef NO_CBLAS
 /**
  * C API specific test
  * Test idamin by comparing it against pre-calculated values
@@ -775,13 +777,15 @@ CTEST(idamin, c_api_min_idx_in_vec_tail){
 CTEST(idamin, c_api_min_idx_in_vec_tail_inc_1){
    blasint i;
    blasint N = ELEMENTS, inc = 1;
-   double x[ELEMENTS * inc];
+   double *x = (double*) malloc(ELEMENTS * inc * sizeof(double));
    for (i = 0; i < N * inc; i ++) {
       x[i] = i + 1000;
    }
 
    x[(N - 1) * inc] = 0.0;
    blasint index = cblas_idamin(N, x, inc);
+   free(x);
    ASSERT_EQUAL(N - 1, index);
 }
+#endif
 #endif

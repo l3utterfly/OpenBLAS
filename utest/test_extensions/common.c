@@ -50,6 +50,7 @@ void drand_generate(double *alpha, blasint n)
         alpha[i] = (double)rand() / (double)RAND_MAX;
 }
 
+#if defined(BUILD_SINGLE) || defined(BUILD_COMPLEX)
 /**
  * Find difference between two rectangle matrix
  * return norm of differences
@@ -69,14 +70,15 @@ float smatrix_difference(float *a, float *b, blasint cols, blasint rows, blasint
         for (j = 0; j < cols; j++) {
             a_ptr[j] -= b_ptr[j];
         }
-        norm += cblas_snrm2(cols, a_ptr, inc);
+        norm += BLASFUNC(snrm2)(&cols, a_ptr, &inc);
         
         a_ptr += ld;
         b_ptr += ld;
     }
     return norm/(float)(rows);
 }
-
+#endif
+#if defined(BUILD_DOUBLE) || defined(BUILD_COMPLEX16)
 double dmatrix_difference(double *a, double *b, blasint cols, blasint rows, blasint ld)
 {
     blasint i = 0;
@@ -92,14 +94,14 @@ double dmatrix_difference(double *a, double *b, blasint cols, blasint rows, blas
         for (j = 0; j < cols; j++) {
             a_ptr[j] -= b_ptr[j];
         }
-        norm += cblas_dnrm2(cols, a_ptr, inc);
+        norm += BLASFUNC(dnrm2)(&cols, a_ptr, &inc);
         
         a_ptr += ld;
         b_ptr += ld;
     }
     return norm/(double)(rows);
 }
-
+#endif
 /**
  * Complex conjugate operation for vector
  * 
@@ -206,7 +208,7 @@ void ztranspose(blasint rows, blasint cols, double *alpha, double *a_src, int ld
  * param lda_dst - leading dimension of output matrix A
  * param conj specifies conjugation
  */
-void scopy(blasint rows, blasint cols, float alpha, float *a_src, int lda_src, 
+void my_scopy(blasint rows, blasint cols, float alpha, float *a_src, int lda_src, 
            float *a_dst, blasint lda_dst)
 {
     blasint i, j;
@@ -217,7 +219,7 @@ void scopy(blasint rows, blasint cols, float alpha, float *a_src, int lda_src,
     }
 }
 
-void dcopy(blasint rows, blasint cols, double alpha, double *a_src, int lda_src, 
+void my_dcopy(blasint rows, blasint cols, double alpha, double *a_src, int lda_src, 
            double *a_dst, blasint lda_dst)
 {
     blasint i, j;
@@ -228,7 +230,7 @@ void dcopy(blasint rows, blasint cols, double alpha, double *a_src, int lda_src,
     }
 }
 
-void ccopy(blasint rows, blasint cols, float *alpha, float *a_src, int lda_src, 
+void my_ccopy(blasint rows, blasint cols, float *alpha, float *a_src, int lda_src, 
            float *a_dst, blasint lda_dst, int conj)
 {
     blasint i, j;
@@ -243,7 +245,7 @@ void ccopy(blasint rows, blasint cols, float *alpha, float *a_src, int lda_src,
     }
 }
 
-void zcopy(blasint rows, blasint cols, double *alpha, double *a_src, int lda_src, 
+void my_zcopy(blasint rows, blasint cols, double *alpha, double *a_src, int lda_src, 
            double *a_dst, blasint lda_dst, int conj)
 {
     blasint i, j;

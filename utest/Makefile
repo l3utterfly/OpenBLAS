@@ -14,7 +14,7 @@ UTESTEXTBIN=openblas_utest_ext
 include $(TOPDIR)/Makefile.system
 
 OBJS=utest_main.o test_min.o test_amax.o test_ismin.o test_rotmg.o test_axpy.o test_dotu.o test_dsdot.o test_swap.o test_rot.o test_dnrm2.o test_zscal.o \
-     test_amin.o test_axpby.o
+     test_amin.o test_axpby.o test_gemv.o
 #test_rot.o test_swap.o test_axpy.o test_dotu.o test_dsdot.o test_fork.o
 OBJS_EXT=utest_main.o $(DIR_EXT)/xerbla.o $(DIR_EXT)/common.o 
 OBJS_EXT+=$(DIR_EXT)/test_isamin.o $(DIR_EXT)/test_idamin.o $(DIR_EXT)/test_icamin.o $(DIR_EXT)/test_izamin.o 
@@ -46,6 +46,9 @@ endif
 ifeq ($(OSNAME), $(filter $(OSNAME),Linux CYGWIN_NT))
 ifneq ($(USE_OPENMP), 1)
 OBJS += test_fork.o
+ifneq ($(NO_LAPACK), 1)
+OBJS += test_post_fork_async.o
+endif
 endif
 OBJS += test_post_fork.o
 endif
@@ -58,25 +61,28 @@ OBJS = utest_main2.o
 endif
 ifeq ($(OSNAME), AIX)
 OBJS = utest_main2.o
+OBJS_EXT = $(DIR_EXT)/utest_main2.o
+endif
+
+ifeq ($(NO_CBLAS), 1)
+override CFLAGS += -DNO_CBLAS 
 endif
 
 all : run_test
 
 ifeq ($(OSNAME), AIX)
-ifeq ($(USE_OPENMP), 1)
 $(UTESTBIN): $(OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ ../$(LIBNAME) $(EXTRALIB)
+
+$(UTESTEXTBIN): $(OBJS_EXT)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ ../$(LIBNAME) $(EXTRALIB)
 else
 $(UTESTBIN): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ ../$(LIBNAME) $(EXTRALIB) $(FEXTRALIB)
-endif
-else
-$(UTESTBIN): $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ ../$(LIBNAME) $(EXTRALIB) $(FEXTRALIB)
-endif
 
 $(UTESTEXTBIN): $(OBJS_EXT)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ ../$(LIBNAME) $(EXTRALIB) $(FEXTRALIB)
+endif
 
 run_test: $(UTESTBIN) $(UTESTEXTBIN)
 ifneq ($(CROSS), 1)

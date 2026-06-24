@@ -92,13 +92,14 @@ static double check_zomatcopy(char api, char order, char trans, blasint rows, bl
         ztranspose(m, n, alpha, data_zomatcopy.a_test, lda, data_zomatcopy.b_verify, ldb, conj);
     } 
     else {
-        zcopy(m, n, alpha, data_zomatcopy.a_test, lda, data_zomatcopy.b_verify, ldb, conj);
+        my_zcopy(m, n, alpha, data_zomatcopy.a_test, lda, data_zomatcopy.b_verify, ldb, conj);
     }
 
     if (api == 'F') {
         BLASFUNC(zomatcopy)(&order, &trans, &rows, &cols, alpha, data_zomatcopy.a_test, 
                             &lda, data_zomatcopy.b_test, &ldb);
     }
+#ifndef NO_CBLAS
     else {
         if (order == 'C') corder = CblasColMajor;
         if (order == 'R') corder = CblasRowMajor;
@@ -109,7 +110,8 @@ static double check_zomatcopy(char api, char order, char trans, blasint rows, bl
         cblas_zomatcopy(corder, ctrans, rows, cols, alpha, data_zomatcopy.a_test, 
                     lda, data_zomatcopy.b_test, ldb);
     }
-    
+#endif
+
     return dmatrix_difference(data_zomatcopy.b_test, data_zomatcopy.b_verify, b_cols, b_rows, ldb*2);
 }
 
@@ -325,6 +327,7 @@ CTEST(zomatcopy, rowmajor_conjtrans_col_100_row_100)
     ASSERT_DBL_NEAR_TOL(0.0, norm, DOUBLE_EPS);
 }
 
+#ifndef NO_CBLAS
 /**
  * C API specific test
  * Test zomatcopy by comparing it against refernce
@@ -508,6 +511,7 @@ CTEST(zomatcopy, c_api_rowmajor_conjtrans_col_100_row_100)
 
     ASSERT_DBL_NEAR_TOL(0.0, norm, DOUBLE_EPS);
 }
+#endif
 
 /**
 * Test error function for an invalid param order.

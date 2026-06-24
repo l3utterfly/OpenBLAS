@@ -73,12 +73,35 @@ static void zgemmt_trusted(char api, enum CBLAS_ORDER order, char uplo, char tra
     if(api == 'F')
         BLASFUNC(zgemm)(&transa, &transb, &m, &m, &k, alpha, data_zgemmt.a_test, &lda,
                         data_zgemmt.b_test, &ldb, beta, data_zgemmt.c_gemm, &ldc);
+#ifndef NO_CBLAS
     else
         cblas_zgemm(order, transa, transb, m, m, k, alpha, data_zgemmt.a_test, lda,
                 data_zgemmt.b_test, ldb, beta, data_zgemmt.c_gemm, ldc);
+#endif
 
     ldc *= 2;
-
+#ifndef NO_CBLAS
+    if (order == CblasRowMajor) {
+    if (uplo == 'U' || uplo == CblasUpper)
+    {
+        for (i = 0; i < m; i++)
+            for (j = i * 2; j < m * 2; j+=2){
+                data_zgemmt.c_verify[i * ldc + j] =
+                    data_zgemmt.c_gemm[i * ldc + j];
+                data_zgemmt.c_verify[i * ldc + j + 1] =
+                    data_zgemmt.c_gemm[i * ldc + j + 1];
+            }
+    } else {
+        for (i = 0; i < m; i++)
+            for (j = 0; j <= i * 2; j+=2){
+                data_zgemmt.c_verify[i * ldc + j] =
+                    data_zgemmt.c_gemm[i * ldc + j];
+                data_zgemmt.c_verify[i * ldc + j + 1] =
+                    data_zgemmt.c_gemm[i * ldc + j + 1];
+	    }
+    	}
+    }else
+#endif	    
     if (uplo == 'L' || uplo == CblasLower)
     {
         for (i = 0; i < m; i++)
@@ -160,9 +183,11 @@ static double check_zgemmt(char api, enum CBLAS_ORDER order, char uplo, char tra
     if (api == 'F')
         BLASFUNC(zgemmt)(&uplo, &transa, &transb, &m, &k, alpha, data_zgemmt.a_test,
                          &lda, data_zgemmt.b_test, &ldb, beta, data_zgemmt.c_test, &ldc);
+#ifndef NO_CBLAS
     else
         cblas_zgemmt(order, uplo, transa, transb, m, k, alpha, data_zgemmt.a_test, lda,
                     data_zgemmt.b_test, ldb, beta, data_zgemmt.c_test, ldc);
+#endif
 
     for (i = 0; i < m * ldc * 2; i++)
         data_zgemmt.c_verify[i] -= data_zgemmt.c_test[i];
@@ -197,9 +222,11 @@ static int check_badargs(char api, enum CBLAS_ORDER order, char uplo, char trans
     if (api == 'F')
         BLASFUNC(zgemmt)(&uplo, &transa, &transb, &m, &k, alpha, data_zgemmt.a_test,
                          &lda, data_zgemmt.b_test, &ldb, beta, data_zgemmt.c_test, &ldc);
+#ifndef NO_CBLAS
     else
         cblas_zgemmt(order, uplo, transa, transb, m, k, alpha, data_zgemmt.a_test, lda,
                     data_zgemmt.b_test, ldb, beta, data_zgemmt.c_test, ldc);
+#endif
 
     return check_error();
 }
@@ -680,6 +707,7 @@ CTEST(zgemmt, lower_beta_one)
     ASSERT_DBL_NEAR_TOL(0.0, norm, DOUBLE_EPS);
 }
 
+#ifndef NO_CBLAS
 /**
  * C API specific test
  * Test zgemmt by comparing it against sgemm
@@ -1591,6 +1619,7 @@ CTEST(zgemmt, c_api_rowmajor_lower_beta_one)
 
     ASSERT_DBL_NEAR_TOL(0.0, norm, DOUBLE_EPS);
 }
+#endif
 
 /**
  * Fortran API specific test
@@ -1735,7 +1764,7 @@ CTEST(zgemmt, xerbla_ldc_invalid)
                             M, K, lda, ldb, ldc, expected_info);
     ASSERT_EQUAL(TRUE, passed);
 }
-
+#ifndef NO_CBLAS
 /**
  * C API specific test.
  * Test error function for an invalid param order.
@@ -2007,4 +2036,5 @@ CTEST(zgemmt, xerbla_c_api_rowmajor_ldc_invalid)
                             M, K, lda, ldb, ldc, expected_info);
     ASSERT_EQUAL(TRUE, passed);
 }
+#endif
 #endif

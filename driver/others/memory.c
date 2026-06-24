@@ -964,7 +964,9 @@ static void *alloc_shm(void *address){
   return map_address;
 }
 
-#if defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS
+#endif
+
+#if ((defined ALLOC_HUGETLB) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS))
 
 static void alloc_hugetlb_free(struct alloc_t *alloc_info){
 
@@ -1066,7 +1068,8 @@ static void *alloc_hugetlb(void *address){
 }
 #endif
 
-#endif
+
+
 
 #ifdef  ALLOC_HUGETLBFILE
 
@@ -1165,11 +1168,10 @@ void *blas_memory_alloc(int procpos){
 #ifdef ALLOC_DEVICEDRIVER
     alloc_devicedirver,
 #endif
-/* Hugetlb implicitly assumes ALLOC_SHM */
-#ifdef ALLOC_SHM
+#ifdef ALLOC_SHM && !defined(ALLOC_HUGETLB)
     alloc_shm,
 #endif
-#if ((defined ALLOC_SHM) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS))
+#if ((defined ALLOC_HUGETLB) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS))
     alloc_hugetlb,
 #endif
 #ifdef ALLOC_MMAP
@@ -1189,7 +1191,6 @@ void *blas_memory_alloc(int procpos){
   void *(**func)(void *address);
   struct alloc_t * alloc_info;
   struct alloc_t ** alloc_table;
-
 
 #if defined(SMP) && !defined(USE_OPENMP)
 int mi;
@@ -1219,7 +1220,7 @@ UNLOCK_COMMAND(&alloc_lock);
       if (!blas_num_threads) blas_cpu_number = blas_get_cpu_number();
 #endif
 
-#if defined(ARCH_X86) || defined(ARCH_X86_64) || defined(ARCH_IA64) || defined(ARCH_MIPS64) || defined(ARCH_ARM64)
+#if defined(ARCH_X86) || defined(ARCH_X86_64) || defined(ARCH_IA64) || defined(ARCH_MIPS64) || defined(ARCH_ARM64) || defined(ARCH_LOONGARCH64)
 #ifndef DYNAMIC_ARCH
       blas_set_parameter();
 #endif
@@ -1282,7 +1283,7 @@ UNLOCK_COMMAND(&alloc_lock);
         }
 #endif
 
-#if (defined ALLOC_SHM) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS)
+#if (defined ALLOC_HUGETLB) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS)
         if ((*func == alloc_hugetlb) && (map_address != (void *)-1)) hugetlb_allocated = 1;
 #endif
 
@@ -1316,7 +1317,11 @@ UNLOCK_COMMAND(&alloc_lock);
  error:
   printf("OpenBLAS : Program will terminate because you tried to allocate too many TLS memory regions.\n");
   printf("This library was built to support a maximum of %d threads - either rebuild OpenBLAS\n", NUM_BUFFERS);
-  printf("with a larger NUM_THREADS value or set the environment variable OPENBLAS_NUM_THREADS to\n");
+#ifdef USE_OPENMP
+  printf("with a larger NUM_THREADS value or set the environment variable OMP_NUM_THREADS to\n");
+#else
+  printf("with a larger NUM_THREADS value or set the environment variable OPENBLAS_NUM_THREADS to\n");  
+#endif
   printf("a sufficiently small number. This error typically occurs when the software that relies on\n");
   printf("OpenBLAS calls BLAS functions from many threads in parallel, or when your computer has more\n");
   printf("cpu cores than what OpenBLAS was configured to handle.\n"); 
@@ -1600,7 +1605,7 @@ void DESTRUCTOR gotoblas_quit(void) {
 }
 
 #if defined(_MSC_VER) && !defined(__clang__)
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
+BOOL APIENTRY OpenBLASDllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
   switch (ul_reason_for_call)
   {
@@ -1649,10 +1654,10 @@ static int on_process_term(void)
 #endif
 
 #ifdef _WIN64
-static const PIMAGE_TLS_CALLBACK dll_callback(HINSTANCE h, DWORD ul_reason_for_call, PVOID pv) = DllMain;
+static const PIMAGE_TLS_CALLBACK dll_callback(HINSTANCE h, DWORD ul_reason_for_call, PVOID pv) = OpenBLASDllMain;
 #pragma const_seg()
 #else
-static void (APIENTRY *dll_callback)(HINSTANCE h, DWORD ul_reason_for_call, PVOID pv) = DllMain;
+static void (APIENTRY *dll_callback)(HINSTANCE h, DWORD ul_reason_for_call, PVOID pv) = OpenBLASDllMain;
 #pragma data_seg()
 #endif
 
@@ -2494,7 +2499,7 @@ static void *alloc_devicedirver(void *address){
 
 #endif
 
-#ifdef ALLOC_SHM
+#if defined(ALLOC_SHM) && !defined(ALLOC_HUGETLB)
 
 static void alloc_shm_free(struct release_t *release){
 
@@ -2506,7 +2511,9 @@ static void alloc_shm_free(struct release_t *release){
 static void *alloc_shm(void *address){
   void *map_address;
   int shmid;
-
+#ifdef DEBUG
+ fprintf(stderr,"alloc_shm got called\n");
+#endif
   shmid = shmget(IPC_PRIVATE, BUFFER_SIZE,IPC_CREAT | 0600);
 
   map_address = (void *)shmat(shmid, address, 0);
@@ -2533,8 +2540,9 @@ static void *alloc_shm(void *address){
 
   return map_address;
 }
+#endif
 
-#if defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS
+#if ((defined ALLOC_HUGETLB) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS))
 
 static void alloc_hugetlb_free(struct release_t *release){
 
@@ -2562,6 +2570,10 @@ static void *alloc_hugetlb(void *address){
 
   void *map_address = (void *)-1;
 
+#ifdef DEBUG
+fprintf(stderr,"alloc_hugetlb got called\n");
+#endif
+
 #if defined(OS_LINUX) || defined(OS_AIX)
   int shmid;
 
@@ -2583,7 +2595,7 @@ static void *alloc_hugetlb(void *address){
 
     if (map_address != (void *)-1){
       shmctl(shmid, IPC_RMID, 0);
-    }
+    }else printf("alloc_hugetlb failed\n");
   }
 #endif
 
@@ -2645,7 +2657,6 @@ static void *alloc_hugetlb(void *address){
 }
 #endif
 
-#endif
 
 #ifdef  ALLOC_HUGETLBFILE
 
@@ -2739,7 +2750,7 @@ struct newmemstruct
 };
 static volatile struct newmemstruct *newmemory;
 
-static int memory_initialized = 0;
+static volatile int memory_initialized = 0;
 static int memory_overflowed = 0;
 /*       Memory allocation routine           */
 /* procpos ... indicates where it comes from */
@@ -2762,11 +2773,10 @@ void *blas_memory_alloc(int procpos){
 #ifdef ALLOC_DEVICEDRIVER
     alloc_devicedirver,
 #endif
-/* Hugetlb implicitly assumes ALLOC_SHM */
-#ifdef ALLOC_SHM
+#if defined(ALLOC_SHM) && !defined(ALLOC_HUGETLB)
     alloc_shm,
 #endif
-#if ((defined ALLOC_SHM) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS))
+#if ((defined ALLOC_HUGETLB) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS))
     alloc_hugetlb,
 #endif
 #ifdef ALLOC_MMAP
@@ -2785,13 +2795,11 @@ void *blas_memory_alloc(int procpos){
   };
   void *(**func)(void *address);
 
-#if defined(USE_OPENMP)
   if (!memory_initialized) {
+#if defined(SMP) && !defined(USE_OPENMP)
+    LOCK_COMMAND(&alloc_lock);
+    if (!memory_initialized) {
 #endif
-
-  LOCK_COMMAND(&alloc_lock);
-
-  if (!memory_initialized) {
 
 #if defined(WHEREAMI) && !defined(USE_OPENMP)
     for (position = 0; position < NUM_BUFFERS; position ++){
@@ -2814,19 +2822,19 @@ void *blas_memory_alloc(int procpos){
     if (!blas_num_threads) blas_cpu_number = blas_get_cpu_number();
 #endif
 
-#if defined(ARCH_X86) || defined(ARCH_X86_64) || defined(ARCH_IA64) || defined(ARCH_MIPS64) || defined(ARCH_ARM64)
+#if defined(ARCH_X86) || defined(ARCH_X86_64) || defined(ARCH_IA64) || defined(ARCH_MIPS64) || defined(ARCH_ARM64) || defined(ARCH_LOONGARCH64)
 #ifndef DYNAMIC_ARCH
     blas_set_parameter();
 #endif
 #endif
 
     memory_initialized = 1;
-
+    WMB;
+#if defined(SMP) && !defined(USE_OPENMP)
   }
   UNLOCK_COMMAND(&alloc_lock);
-#if defined(USE_OPENMP)
-  }
 #endif
+}
 
 #ifdef DEBUG
   printf("Alloc Start ...\n");
@@ -2918,6 +2926,7 @@ void *blas_memory_alloc(int procpos){
   blas_unlock(&memory[position].lock);
 #endif
   if (!memory[position].addr) {
+    int failcount = 0;
     do {
 #ifdef DEBUG
       printf("Allocation Start : %lx\n", base_address);
@@ -2945,8 +2954,22 @@ void *blas_memory_alloc(int procpos){
         }
 #endif
 
-#if (defined ALLOC_SHM) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS)
+#if (defined ALLOC_HUGETLB) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS)
         if ((*func == alloc_hugetlb) && (map_address != (void *)-1)) hugetlb_allocated = 1;
+#ifdef DEBUG
+	if (hugetlb_allocated) printf("allocating via shared memory with large page support (hugetlb)\n");
+#endif
+#endif
+
+#if (defined ALLOC_SHM) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS)
+#ifdef DEBUG
+	printf("allocating via shared memory\n");
+#endif
+        if ((*func == alloc_shm) && (map_address == (void *)-1)) {
+#ifndef OS_WINDOWS
+            fprintf(stderr, "OpenBLAS Warning ... shared memory allocation was failed.\n");
+#endif
+	}
 #endif
 
         func ++;
@@ -2955,8 +2978,16 @@ void *blas_memory_alloc(int procpos){
 #ifdef DEBUG
       printf("  Success -> %08lx\n", map_address);
 #endif
-      if (((BLASLONG) map_address) == -1) base_address = 0UL;
-
+      if (((BLASLONG) map_address) == -1) {
+	      base_address = 0UL;
+	      failcount++;
+	      if (failcount >10) {
+		      fprintf(stderr, "OpenBLAS error: Memory allocation still failed after 10 retries, giving up.\n");
+		      exit(1);
+	      }
+      } else {
+	      failcount = 0;
+      }
       if (base_address) base_address += BUFFER_SIZE + FIXED_PAGESIZE;
 
     } while ((BLASLONG)map_address == -1);
@@ -3012,8 +3043,13 @@ void *blas_memory_alloc(int procpos){
 #endif
  if (memory_overflowed) goto terminate;
   fprintf(stderr,"OpenBLAS warning: precompiled NUM_THREADS exceeded, adding auxiliary array for thread metadata.\n");
+  fprintf(stderr,"Note that your application may still crash, if it is calling OpenBLAS from multiple threads in parallel\n"); 
   fprintf(stderr,"To avoid this warning, please rebuild your copy of OpenBLAS with a larger NUM_THREADS setting\n");
+#ifdef USE_OPENMP
+  fprintf(stderr,"or set the environment variable OMP_NUM_THREADS to %d or lower\n", MAX_CPU_NUMBER);
+#else
   fprintf(stderr,"or set the environment variable OPENBLAS_NUM_THREADS to %d or lower\n", MAX_CPU_NUMBER);
+#endif
   memory_overflowed=1;
   MB;
   new_release_info = (struct release_t*) malloc(NEW_BUFFERS * sizeof(struct release_t));
@@ -3061,10 +3097,23 @@ allocation2:
         }
 #endif
 
-#if (defined ALLOC_SHM) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS)
+#if (defined ALLOC_HUGETLB) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS)
+#ifdef DEBUG
+	fprintf(stderr,"OpenBLAS: allocating via shared memory with large page support (hugetlb)\n");
+#endif
         if ((*func == alloc_hugetlb) && (map_address != (void *)-1)) hugetlb_allocated = 1;
 #endif
 
+#if (defined ALLOC_SHM) && (defined OS_LINUX  || defined OS_AIX  || defined __sun__  || defined OS_WINDOWS)
+#ifdef DEBUG
+	fprintf(stderr,"allocating via shared memory\n");
+#endif
+        if ((*func == alloc_shm) && (map_address == (void *)-1)) {
+#ifndef OS_WINDOWS
+            fprintf(stderr, "OpenBLAS Warning ... shared memory allocation was failed.\n");
+#endif
+	}
+#endif
         func ++;
       }
 
@@ -3102,7 +3151,11 @@ terminate:
 #endif
   printf("OpenBLAS : Program is Terminated. Because you tried to allocate too many memory regions.\n");
   printf("This library was built to support a maximum of %d threads - either rebuild OpenBLAS\n", NUM_BUFFERS);
-  printf("with a larger NUM_THREADS value or set the environment variable OPENBLAS_NUM_THREADS to\n");
+#ifdef USE_OPENMP
+  printf("with a larger NUM_THREADS value or set the environment variable OMP_NUM_THREADS to\n");
+#else
+  printf("with a larger NUM_THREADS value or set the environment variable OPENBLAS_NUM_THREADS to\n");  
+#endif
   printf("a sufficiently small number. This error typically occurs when the software that relies on\n");
   printf("OpenBLAS calls BLAS functions from many threads in parallel, or when your computer has more\n");
   printf("cpu cores than what OpenBLAS was configured to handle.\n"); 
@@ -3223,7 +3276,7 @@ void blas_shutdown(void){
 #endif
       newmemory[pos].lock   = 0;
     }
-    free(newmemory);
+    free((void*)newmemory);
     newmemory = NULL;
     memory_overflowed = 0;  
   }
@@ -3433,7 +3486,7 @@ void DESTRUCTOR gotoblas_quit(void) {
 }
 
 #if defined(_MSC_VER) && !defined(__clang__)
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
+BOOL APIENTRY OpenBLASDllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
   switch (ul_reason_for_call)
   {
@@ -3477,7 +3530,7 @@ static int on_process_term(void)
 #else
 #pragma data_seg(".CRT$XLB")
 #endif
-static void (APIENTRY *dll_callback)(HINSTANCE h, DWORD ul_reason_for_call, PVOID pv) = DllMain;
+static void (APIENTRY *dll_callback)(HINSTANCE h, DWORD ul_reason_for_call, PVOID pv) = OpenBLASDllMain;
 #ifdef _WIN64
 #pragma const_seg()
 #else

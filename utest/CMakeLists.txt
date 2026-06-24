@@ -18,6 +18,7 @@ else ()
     test_zscal.c
     test_amin.c
     test_axpby.c
+    test_gemv.c
   )
 endif ()
 
@@ -101,6 +102,12 @@ set(OpenBLAS_utest_src
   ${OpenBLAS_utest_src}
   test_fork.c
   )
+if (NOT NO_LAPACK)
+set(OpenBLAS_utest_src
+  ${OpenBLAS_utest_src}
+  test_post_fork_async.c
+  )
+endif()
 endif()
 set(OpenBLAS_utest_src
   ${OpenBLAS_utest_src}
